@@ -35,6 +35,8 @@ services:
         condition: service_healthy
     environment:
       ROUTER_DEPLOYMENT: saas
+      ROUTER_GENERATION_ENABLED: ${ROUTER_GENERATION_ENABLED:-1}
+      ROUTER_TRUSTED_PROXY_CIDRS: ${ROUTER_TRUSTED_PROXY_CIDRS:-}
       DATABASE_URL: postgresql+psycopg://router:${POSTGRES_PASSWORD}@db/router
       ROUTER_SECRET_KEY: ${ROUTER_SECRET_KEY:?Set a Fernet encryption key}
       ROUTER_PUBLIC_URL: https://${ROUTER_DOMAIN:?Set the public domain}

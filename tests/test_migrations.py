@@ -23,7 +23,7 @@ class MigrationTests(unittest.TestCase):
         migrate(self.engine)
         migrate(self.engine)
         check_schema(self.engine)
-        self.assertEqual(schema_status(self.engine), {'current': 2, 'required': 2})
+        self.assertEqual(schema_status(self.engine), {'current': 3, 'required': 3})
 
     def test_adopt_legacy_preserves_data(self):
         metadata.create_all(self.engine)
@@ -62,7 +62,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_concurrent_migrators(self):
         with concurrent.futures.ThreadPoolExecutor(4) as pool:
-            self.assertEqual(list(pool.map(lambda _: migrate(self.engine), range(4))), [2]*4)
+            self.assertEqual(list(pool.map(lambda _: migrate(self.engine), range(4))), [3]*4)
 
     def test_current_version_still_checks_structure(self):
         migrate(self.engine)
@@ -70,3 +70,11 @@ class MigrationTests(unittest.TestCase):
             db.exec_driver_sql('DROP TABLE sessions')
         with self.assertRaises(SchemaError):
             check_schema(self.engine)
+
+    def test_upgrade_from_previous_revision(self):
+        with patch("llm_router.migrations.LATEST", 2):
+            migrate(self.engine)
+        self.assertNotIn("rate_buckets", inspect(self.engine).get_table_names())
+        migrate(self.engine)
+        check_schema(self.engine)
+        self.assertIn("rate_buckets", inspect(self.engine).get_table_names())

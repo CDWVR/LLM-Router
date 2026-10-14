@@ -1,6 +1,6 @@
 # Database upgrades and recovery
 
-The application uses forward-only numbered migrations in `llm_router/migrations.py`, with a frozen initial schema in `llm_router/schema_v1.py`. Revision 1 creates or adopts the recognizable legacy schema and its indexes. Revision 2 widens PostgreSQL micro-dollar accounting columns to BIGINT. SQLite already stores 64-bit integers.
+The application uses forward-only numbered migrations in `llm_router/migrations.py`, with a frozen initial schema in `llm_router/schema_v1.py`. Revision 1 creates or adopts the recognizable legacy schema and its indexes. Revision 2 widens PostgreSQL micro-dollar accounting columns to BIGINT. SQLite already stores 64-bit integers. Revision 3 adds shared request-rate buckets.
 
 ## Deployment workflow
 

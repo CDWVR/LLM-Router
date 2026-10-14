@@ -215,3 +215,9 @@ class SaaSTests(unittest.TestCase):
         self.assertEqual(self.post("/workspace", payload).status_code, 409)
         self.assertEqual(self.store.usage("local")["daily_limit_usd"], 50)
         self.assertEqual(self.store.get("local", "settings", "routing")["profile"], "fast")
+
+    def test_generation_pause_blocks_web_and_comparison(self):
+        with patch.dict(os.environ, {"ROUTER_GENERATION_ENABLED": "0"}), patch("llm_router.service.run_turn") as generation:
+            self.assertEqual(self.post("/turn", {"message": "Hello"}).status_code, 503)
+            self.assertEqual(self.post("/compare", {}).status_code, 503)
+            generation.assert_not_called()

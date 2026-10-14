@@ -3,10 +3,10 @@
 Runtime workers only check the version in SaaS. Operators run migrate separately.
 Revision functions and the v1 snapshot are immutable once released.
 """
-from sqlalchemy import Column, Integer, MetaData, Table, inspect, select, insert, update
+from sqlalchemy import Column, Integer, String, MetaData, Table, inspect, select, insert, update
 from .schema_v1 import metadata as baseline
 
-LATEST = 2
+LATEST = 3
 version_metadata = MetaData()
 versions = Table("router_schema", version_metadata,
                  Column("id", Integer, primary_key=True),
@@ -61,7 +61,18 @@ def _revision_two(connection):
         connection.exec_driver_sql("ALTER TABLE runs ALTER COLUMN charge_micro TYPE BIGINT")
 
 
-REVISIONS = {1: _revision_one, 2: _revision_two}
+rate_metadata = MetaData()
+rate_buckets = Table("rate_buckets", rate_metadata,
+                     Column("id", String(64), primary_key=True),
+                     Column("window", Integer, nullable=False),
+                     Column("count", Integer, nullable=False))
+
+
+def _revision_three(connection):
+    rate_metadata.create_all(connection)
+
+
+REVISIONS = {1: _revision_one, 2: _revision_two, 3: _revision_three}
 
 
 def migrate(engine):
@@ -87,6 +98,8 @@ def migrate(engine):
                 else:
                     connection.execute(update(versions).where(versions.c.id == 1).values(revision=revision))
             _validate_baseline(connection)
+            if LATEST >= 3:
+                _validate_rate_buckets(connection)
             connection.commit()
         except BaseException:
             connection.rollback()
@@ -104,3 +117,10 @@ def check_schema(engine):
         if _version(connection) != LATEST:
             raise SchemaError("Database migration required: python -m llm_router.manage migrate")
         _validate_baseline(connection)
+        _validate_rate_buckets(connection)
+
+
+def _validate_rate_buckets(connection):
+    inspector = inspect(connection)
+    if not inspector.has_table("rate_buckets") or {column["name"] for column in inspector.get_columns("rate_buckets")} != {"id", "window", "count"}:
+        raise SchemaError("Missing or incompatible request-rate schema")

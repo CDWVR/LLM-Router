@@ -235,6 +235,8 @@ def create_app(database_url=None, secret_key=None, saas=None):
                 if action == "connection_save":
                     return workspace.save_connection(project, data)
                 if action == "connection_test":
+                    if not store.allow_request("discovery:"+project, 5):
+                        raise ServiceError("rate_limited", 429)
                     return workspace.discover(project, text(data.get("name"), 64))
                 if action == "model_save":
                     return workspace.save_model(project, data.get("model", {}))
@@ -346,6 +348,8 @@ def create_app(database_url=None, secret_key=None, saas=None):
         return JSONResponse({"ok": True})
 
     async def turn(request):
+        if os.environ.get("ROUTER_GENERATION_ENABLED", "1") != "1":
+            raise ServiceError("generation_paused", 503)
         api = request.url.path.startswith("/v1/")
         session = await run_in_threadpool(who, request, api)
         data = await body(request)
@@ -557,6 +561,8 @@ def create_app(database_url=None, secret_key=None, saas=None):
         return JSONResponse(await run_in_threadpool(listing))
 
     async def compare(request):
+        if os.environ.get("ROUTER_GENERATION_ENABLED", "1") != "1":
+            raise ServiceError("generation_paused", 503)
         session = await run_in_threadpool(who, request)
         data = await body(request)
         prompt = text(data.get("prompt"), 20000)
@@ -652,5 +658,7 @@ def create_app(database_url=None, secret_key=None, saas=None):
     app.state.store, app.state.workspace = store, workspace
     app.add_middleware(SessionMiddleware, secret_key=key.decode(), session_cookie="router_oidc", https_only=saas, max_age=600, same_site="lax")
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(public_url).hostname] if saas else ["127.0.0.1", "localhost", "testserver"])
+    from .abuse import AbuseProtection
+    app.add_middleware(AbuseProtection, store=store, key=key, enabled=saas)
     app.add_middleware(SecurityHeaders, saas=saas)
     return app

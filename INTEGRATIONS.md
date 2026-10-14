@@ -63,3 +63,5 @@ Project admission uses shared database transactions: at most three active genera
 `router.reserved_usd` is reserved budget, not a provider invoice. Token counts are returned when available; missing usage is null. Accurate billing still needs provider reconciliation. Catalog price and capability errors can invalidate estimates. The dashboard displays the latest 500 request records; its 24-hour reserved total covers all retained requests in that window.
 
 Errors before streaming use a JSON error object with a safe code. Errors after headers are sent use SSE error frames. Provider credentials and raw provider error bodies are excluded from client error responses.
+
+Public SaaS deployments also apply shared HTTP request limits. A throttled request returns 429 with `Retry-After`; an unavailable limiter fails closed with 503. Operators can pause new generations with `ROUTER_GENERATION_ENABLED=0`. See [Abuse controls](deploy/ABUSE_CONTROLS.md).

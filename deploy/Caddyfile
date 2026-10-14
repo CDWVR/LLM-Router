@@ -4,6 +4,7 @@
     }
     reverse_proxy app:8765 {
         flush_interval -1
+        header_up X-Router-Client-IP {remote_host}
     }
     header -Server
 }

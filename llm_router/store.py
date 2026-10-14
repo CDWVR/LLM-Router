@@ -58,6 +58,23 @@ class Store:
                 connection.rollback()
                 raise
 
+    def allow_request(self, identifier, limit, period=60):
+        """Shared fixed-window counters with bounded storage and atomic increments."""
+        from .migrations import rate_buckets
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        window = int(time.time() // period)
+        with self.transaction() as db:
+            # A fixed number of buckets bounds unauthenticated cardinality. Hash
+            # collisions conservatively share a quota; they never widen one.
+            bucket = digest(identifier.split(":", 1)[0])[:8]+digest(identifier)[:4]
+            statement = (pg_insert if self.engine.dialect.name == "postgresql" else sqlite_insert)(rate_buckets).values(id=bucket, window=window, count=1)
+            from sqlalchemy import case, or_
+            statement = statement.on_conflict_do_update(index_elements=[rate_buckets.c.id],
+                set_={"window": window, "count": case((rate_buckets.c.window != window, 1), else_=rate_buckets.c.count+1)},
+                where=or_(rate_buckets.c.window != window, rate_buckets.c.count < limit)).returning(rate_buckets.c.id)
+            return db.execute(statement).first() is not None
+
     def new_project(self, user, name="My workspace", project_id=None):
         if len(self.memberships(user)) >= 10:
             raise ServiceError("workspace_limit_reached", 409)
