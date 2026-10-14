@@ -1,5 +1,6 @@
 import json
 import os
+import math
 import urllib.error
 import urllib.request
 
@@ -34,13 +35,20 @@ def post_decisions(body: dict, timeout: float) -> dict:
 
 
 def choice_is_actionable(answer: dict, option_keys: set[str]) -> bool:
+    if not isinstance(answer, dict):
+        return False
     choice = answer.get("choice")
     probabilities = answer.get("probabilities") or {}
-    if choice not in option_keys or choice not in probabilities:
+    if not isinstance(choice, str) or not isinstance(probabilities, dict) or choice not in option_keys or choice not in probabilities:
         return False
-    confidence = float(answer.get("confidence") or 0)
-    selected = float(probabilities[choice])
-    others = [float(value) for key, value in probabilities.items() if key != choice]
+    try:
+        confidence = float(answer.get("confidence") or 0)
+        selected = float(probabilities[choice])
+        others = [float(value) for key, value in probabilities.items() if key != choice]
+    except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(value) and 0 <= value <= 1 for value in [confidence, selected, *others]):
+        return False
     runner_up = max(others) if others else 0.0
     return confidence >= CONFIDENCE_FLOOR and selected - runner_up >= PROBABILITY_MARGIN
 
@@ -76,10 +84,18 @@ def ask(state: dict, eligible_criteria: dict[str, str], timeout: float) -> dict:
         {"model": JEV_MODEL, "state": state, "questions": questions},
         timeout=timeout,
     )
+    if not isinstance(payload, dict) or not isinstance(payload.get("answers"), dict):
+        raise JevUnavailable("Invalid semantic-router response.")
     answers = payload.get("answers") or {}
     task = answers.get("task_type") or {}
     route = answers.get("route") or {}
     verification = answers.get("needs_verification") or {}
+    if any(not isinstance(answer, dict) for answer in [task, route, verification]):
+        raise JevUnavailable("Invalid semantic-router response.")
+    try:
+        verify_probability = float(verification.get("noul") or 0)
+    except (TypeError, ValueError) as exc:
+        raise JevUnavailable("Invalid semantic-router response.") from exc
     task_keys = set(questions["task_type"]["criteria"])
     route_keys = set(eligible_criteria)
     return {
@@ -89,7 +105,7 @@ def ask(state: dict, eligible_criteria: dict[str, str], timeout: float) -> dict:
         "route": route.get("choice") if choice_is_actionable(route, route_keys) else None,
         "route_confidence": route.get("confidence"),
         "route_probabilities": route.get("probabilities"),
-        "needs_verification": float(verification.get("noul") or 0) >= 0.8,
+        "needs_verification": math.isfinite(verify_probability) and 0.8 <= verify_probability <= 1,
         "model": payload.get("model"),
         "usage": payload.get("usage"),
     }

@@ -83,7 +83,7 @@ class QualityAndTraceTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         from llm_router.quality import build_quality_table
-        from llm_router.trace import append_trace, label_last
+        from llm_router.trace import append_trace, label_request
 
         with tempfile.TemporaryDirectory() as folder:
             traces = Path(folder) / "traces.jsonl"
@@ -99,14 +99,15 @@ class QualityAndTraceTests(unittest.TestCase):
                 "task_type": "chat",
                 "returned_model_id": "openai/gpt-oss-20b",
                 "include_in_quality": True,
+                "request_id": "rated", "owner_id": "owner",
             }, traces)
-            self.assertTrue(label_last("pass", traces))
+            self.assertTrue(label_request("rated", "owner", "pass", traces))
             table = build_quality_table(traces, Path(folder) / "quality.json", min_samples=1)
             self.assertEqual(table["rates"]["openai/gpt-oss-20b"]["chat"]["n"], 1)
             self.assertEqual(table["rates"]["openai/gpt-oss-20b"]["chat"]["rate"], 1.0)
             self.assertNotIn("openai/gpt-oss-120b", table["rates"])
 
-    def test_invalid_json_does_not_call_a_second_model(self):
+    def test_invalid_json_is_withheld_after_bounded_fallback(self):
         from llm_router.execute import run_turn
         calls = []
 
@@ -119,16 +120,14 @@ class QualityAndTraceTests(unittest.TestCase):
         ), patch("llm_router.execute.load_policy", return_value={
             "quality_table": None, "candidate_quality_table": None, "shadow": False, "canary_fraction": 0,
         }):
-            result = run_turn(
-                [{"role": "user", "text": "Hi"}],
-                "",
-                None,
-                lambda history, model_id, image_path: ["hi"],
-                response_schema={"type": "object", "required": ["answer"]},
-                trace_path=None,
-            )
-        self.assertEqual(result["validation"], "invalid_json")
-        self.assertEqual(calls, ["openai/gpt-oss-20b"])
+            with self.assertRaisesRegex(RuntimeError, "output_validation_failed"):
+                run_turn(
+                    [{"role": "user", "text": "Hi"}], "", None,
+                    lambda history, model_id, image_path: ["hi"],
+                    response_schema={"type": "object", "required": ["answer"]},
+                    trace_path=None,
+                )
+        self.assertEqual(calls, ["openai/gpt-oss-20b", "openai/gpt-oss-120b"])
 
     def test_stream_clears_a_partial_reply_before_retry(self):
         from llm_router.execute import run_turn
@@ -199,6 +198,60 @@ class WebSafetyTests(unittest.TestCase):
         self.assertTrue(encoded.startswith("event: delta\n"))
         self.assertEqual(encoded.count("data: "), 1)
         self.assertEqual(json.loads(encoded.split("data: ", 1)[1].strip())["text"], "a<b>\nline")
+
+    def test_a_broken_catalog_keeps_the_models_already_loaded(self):
+        from pathlib import Path
+        from llm_router.registry import BY_ID, reload_catalog
+        import llm_router.registry as registry
+        before = set(BY_ID)
+        self.assertFalse(reload_catalog(Path("missing-catalog.json")))
+        self.assertEqual(set(BY_ID), before)
+        self.assertTrue(registry.catalog_error)
+        self.assertTrue(reload_catalog())
+        self.assertEqual(registry.catalog_error, "")
+
+    def test_jev_keeps_the_latest_message_inside_its_budget(self):
+        from llm_router.pipeline import JEV_CHAR_BUDGET, conversation_state
+        history = [
+            {"role": "user", "text": "A" * 80_000},
+            {"role": "assistant", "text": "B" * 80_000},
+            {"role": "user", "text": "now write the tests"},
+        ]
+        state = conversation_state(history)
+        self.assertEqual(state["latest_user_message"], "now write the tests")
+        self.assertEqual(state["has_image"], False)
+        used = len(state["latest_user_message"]) + sum(len(turn["text"]) for turn in state.get("recent_turns", []))
+        self.assertLessEqual(used, JEV_CHAR_BUDGET)
+        self.assertEqual(state["recent_turns"][-1]["text"], "B" * 80_000)
+        self.assertLess(len(state["recent_turns"][0]["text"]), 80_000)
+        self.assertTrue(set(state["recent_turns"][0]["text"]) == {"A"})
+
+    def test_passphrase_must_match_exactly(self):
+        from llm_router.web import password_matches, password_required
+        with patch.dict("os.environ", {"ROUTER_PASSWORD": "correct horse"}, clear=False):
+            self.assertTrue(password_required())
+            self.assertTrue(password_matches("correct horse"))
+            self.assertFalse(password_matches("correct"))
+        with patch.dict("os.environ", {"ROUTER_PASSWORD": ""}, clear=False):
+            self.assertFalse(password_required())
+
+    def test_measured_quality_waits_for_twenty_labels(self):
+        import tempfile
+        from pathlib import Path
+        from llm_router.quality import QUALITY_MIN_SAMPLES, build_quality_table
+        from llm_router.trace import append_trace
+        with tempfile.TemporaryDirectory() as folder:
+            traces = Path(folder) / "traces.jsonl"
+            append_trace({
+                "status": "completed",
+                "include_in_quality": True,
+                "label": "pass",
+                "task_type": "chat",
+                "returned_model_id": "openai/gpt-oss-20b",
+            }, traces)
+            table = build_quality_table(traces, Path(folder) / "quality.json", min_samples=QUALITY_MIN_SAMPLES)
+            self.assertEqual(table["rates"], {})
+            self.assertEqual(table["min_samples"], 20)
 
     def test_only_localhost_is_allowed(self):
         from llm_router.web import host_allowed

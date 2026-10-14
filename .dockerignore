@@ -1,0 +1,9 @@
+.git
+.venv
+.env*
+data
+tests
+report-exports
+*.png
+dependency-audit.json
+__pycache__

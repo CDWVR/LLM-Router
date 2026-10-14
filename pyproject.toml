@@ -5,13 +5,18 @@ description = "Route each question to a suitable model, then show why it was cho
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "dotenv>=0.9.9",
-    "google-genai>=2.25.0",
-    "langchain>=1.4.2",
-    "langchain-community>=0.4.2",
-    "langchain-google-genai>=4.4.0",
-    "langchain-groq>=1.1.3",
-    "langgraph>=1.2.12",
-    "numpy>=2.5.3",
-    "pandas>=3.0.6",
+    "jsonschema>=4.23.0",
+    "pillow>=11.0.0",
+    "python-dotenv>=1.2.3",
+    "langchain-core>=1.6.4",
+    "starlette>=0.48.0",
+    "uvicorn>=0.35.0",
+    "sqlalchemy>=2.0.43,<3",
+    "psycopg[binary]>=3.2.9",
+    "cryptography>=45.0.6",
+    "authlib>=1.6.3",
+    "itsdangerous>=2.2.0",
 ]
+
+[project.optional-dependencies]
+embeddings = ["google-genai>=2.25.0"]

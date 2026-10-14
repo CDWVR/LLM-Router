@@ -1,6 +1,6 @@
 # Production LLM router
 
-This is the target architecture. The CLI implements the request path: eligibility, a Jev Choice among the models that remain, policy ranking when that choice is missing or low-confidence, and one fallback execution. Shared health, canary promotion, a separate verifier service, and regional sinks are specified here and are not running processes in this repository.
+Implementation status (2026-10-14): the default app is now an ASGI service with OIDC sessions, project-scoped PostgreSQL storage, encrypted provider credentials, per-project admission budgets, model discovery, shared health records, and a streaming API. See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for verified behavior and remaining release gates. The sections below are the broader target architecture; canaries, autonomous learned routing, regional sinks, and separate verifier services remain proposals. Tenant-scoped web/API routing deliberately disables legacy global feedback and Jev state.
 
 The router answers one operational question: **which eligible model should execute this request under this tenant's constraints, and what happens if that call fails?** It does not answer that question by asking another model to pick a name.
 
@@ -382,7 +382,7 @@ Four reviews tightened the spec where an implementer would otherwise have invent
 
 ## 21. Web client
 
-`app.py` serves the router on port 8765, on this machine and on other devices on the same local network. The browser is a view of the decision. It cannot change the model choice, limits, residency, or keys.
+`app.py` serves the router on port 8765, on this machine and on other devices on the same local network. The browser is a view of the decision. It cannot change the model choice, limits, residency, or keys. The models it may choose are the rows in `catalog.json`. A measured success rate replaces a row's quality estimate only after 20 labeled replies for that model and task. Jev is given a trimmed tail of the thread, not the image bytes. When `ROUTER_PASSWORD` is set, a turn is refused until that session unlocks.
 
 **Two states.** Before the first question the page is a single centered stack: the 3D mark, the headline, the composer, and three example prompts. Sending moves the composer to the bottom, docks the mark into the header, and shows the thread in a 720px reading column. New thread reverses that, and keeps the old thread for five seconds behind an Undo toast before the server session is cleared.
 

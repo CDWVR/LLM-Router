@@ -1,0 +1,9 @@
+{$ROUTER_DOMAIN} {
+    request_body {
+        max_size 12MB
+    }
+    reverse_proxy app:8765 {
+        flush_interval -1
+    }
+    header -Server
+}

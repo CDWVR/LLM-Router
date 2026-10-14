@@ -1,11 +1,16 @@
 # Local routing records
 data/traces.jsonl
 data/uploads/
+data/reports.sqlite3*
+data/workspace.sqlite3*
+data/secret.key
+report-exports/
 
 # Secrets
 .env
 .env.*
 !.env.example
+!.env.saas.example
 
 # Virtual environments
 .venv/

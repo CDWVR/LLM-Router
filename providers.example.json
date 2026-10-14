@@ -1,0 +1,20 @@
+{
+  "providers": {
+    "local": {
+      "adapter": "openai_compatible",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "api_key_env": null,
+      "token_parameter": "max_tokens",
+      "include_usage": false,
+      "enabled": true
+    },
+    "company": {
+      "adapter": "openai_compatible",
+      "base_url": "https://your-company-endpoint.example/v1",
+      "api_key_env": "COMPANY_MODEL_API_KEY",
+      "token_parameter": "max_tokens",
+      "include_usage": true,
+      "enabled": false
+    }
+  }
+}

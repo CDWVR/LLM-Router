@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: router
+      POSTGRES_USER: router
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U router -d router"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  migrate:
+    build: .
+    command: [python, -m, llm_router.manage, migrate]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://router:${POSTGRES_PASSWORD}@db/router
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    environment:
+      ROUTER_DEPLOYMENT: saas
+      DATABASE_URL: postgresql+psycopg://router:${POSTGRES_PASSWORD}@db/router
+      ROUTER_SECRET_KEY: ${ROUTER_SECRET_KEY:?Set a Fernet encryption key}
+      ROUTER_PUBLIC_URL: https://${ROUTER_DOMAIN:?Set the public domain}
+      OIDC_ISSUER: ${OIDC_ISSUER:?Set the identity issuer URL}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set the identity client ID}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?Set the identity client secret}
+      ROUTER_METRICS_TOKEN: ${ROUTER_METRICS_TOKEN:-}
+      ROUTER_PROVIDER_HOSTS: ${ROUTER_PROVIDER_HOSTS:-}
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /app/data:size=16m,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+  edge:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      ROUTER_DOMAIN: ${ROUTER_DOMAIN:?Set the public domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+volumes:
+  postgres_data:
+  caddy_data:

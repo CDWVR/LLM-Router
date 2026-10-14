@@ -1,80 +1,63 @@
 # LLM Router
 
-A local web app that chooses a model for each question and shows the reason on screen.
+Route requests to your own OpenAI, Anthropic, Groq, OpenRouter, or compatible model connections. The app combines chat, explainable model selection, provider onboarding, conversation management, comparisons, and workspace administration.
 
-Every message passes three checks before a model is called. Eligibility drops models that cannot take the request. When more than one text model remains, TypeSafe Jev (`typesafe/jev-1.13` through the OpenRouter Decisions API) picks a task and a preferred model. A fixed ranking policy then orders the eligible models by quality and expected speed. Groq writes the reply. OpenRouter is used only for Jev.
+## Run locally
 
-The design behind those checks is in [PRODUCTION_ARCHITECTURE.md](PRODUCTION_ARCHITECTURE.md).
+Requires Python 3.12 and uv:
 
-## Run it
-
-You need Python 3.12 and [uv](https://docs.astral.sh/uv/).
-
-```bash
-uv sync
-copy .env.example .env
+```powershell
+uv sync --locked
+Copy-Item .env.example .env
 uv run python app.py
 ```
 
-On macOS or Linux, use `cp .env.example .env` instead of `copy`. Then open http://127.0.0.1:8765.
+Open http://127.0.0.1:8765. Local mode automatically opens a trusted personal workspace and refuses a non-loopback bind through `app.py`. It is for development on your computer. Do not expose it through a tunnel or reverse proxy. It does not use the legacy `ROUTER_PASSWORD` gate.
 
-Put these keys in `.env`. The file stays on your machine and is listed in `.gitignore`.
+Open **Workspace > Models** to connect a provider, optionally discover its models, and enter a model's limits, capabilities, prices, and quality estimates. Credentials added here are encrypted in the database. Local mode can also use the environment keys in `.env` and the seed `catalog.json`; SaaS projects start empty and never inherit operator provider keys.
 
-| Variable | Used for |
-| --- | --- |
-| `GROQ_API_KEY` | Replies, and the second-opinion check |
-| `OPENROUTER_API_KEY` | Jev only |
+Local data lives in `data/workspace.sqlite3`; the generated encryption key is `data/secret.key`. Back up both together and restrict access to this directory. Losing the key loses access to saved provider credentials. Existing legacy conversations and bug-report databases are not automatically migrated.
 
-## What the page does
+## Included product features
 
-- A start screen, then a conversation. New thread can be undone for a few seconds.
-- Your message stays in a bubble. The reply appears as it is written, then becomes the formatted reading text (code blocks and tables) once the model finishes. Formatting still happens on the server.
-- A chip above each reply names the model, the task, and Jev's confidence. Open it for the decision: eligibility, analysis, ranking, retries, and how the candidates compared.
-- Attach a PNG, JPEG, GIF, or WebP image, or reuse the last one. Paste and drag-and-drop work. "Double-check answer" asks a different model to review the reply.
-- The mark in the header is the catalog. While a request is out, a light travels toward each model. When the reply arrives, it settles on the model that answered.
+- Streaming chat with cancellation, image input, model-selection details, optional answer verification and safe formatted output.
+- Workspace dashboard with reserved spend, response latency, recent requests and provider status.
+- Saved conversations with search, rename, archive/restore and JSON export.
+- Provider onboarding, connection checks, model discovery, manual model registration and capability controls.
+- Balanced, speed and quality routing profiles, provider allowlists, request limits and shared workspace budgets. Local deployments also support a loopback-only private profile.
+- Two- or three-model comparison and saved evaluation prompts.
+- Bug-report button with a border flash, animated screenshot preview, rectangular redaction, image removal and a description field. Administrators can triage, tag and export private reports.
+- Workspace membership with single-use invitations, project switching and revocable API keys.
+- Responsive drawers, custom form styling, focus handling, transitions and reduced-motion support. Drafts remain in memory rather than browser storage.
 
-The server listens on `0.0.0.0:8765`, so another device on the same subnet can open this computer's address on that port. The Host header has to be localhost, this computer's name, or a private address. Windows Firewall may still block other devices until port 8765 is allowed for the local subnet. Anyone who can reach the page sends prompts with the keys in your `.env`.
+The screenshot is a DOM reconstruction, not an operating-system screenshot; some effects and canvas content may differ. Review it before submitting. Reports stay in the workspace database; no GitHub issue or external message is sent.
 
-## Models
+## Public multi-tenant deployment
 
-| Name | Id | When it fits |
-| --- | --- | --- |
-| GPT-OSS 20B | `openai/gpt-oss-20b` | Short questions, definitions, rewrites |
-| GPT-OSS 120B | `openai/gpt-oss-120b` | Code, proofs, and multi-step planning |
-| Qwen 3.8 27B | `qwen/qwen3.8-27b` | An attached image, OCR, or a chart |
+The repository includes a non-root Docker image, PostgreSQL, a one-shot migration job and Caddy HTTPS compose configuration, plus an OIDC authentication integration. It is a deployment foundation, not a completed public launch. Read [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the remaining release gates.
 
-All three are called through Groq. Quality and expected latency live in `llm_router/registry.py` and are starting estimates until a published quality table replaces them.
+1. Copy `.env.saas.example` to `.env.saas` and fill in the domain, database password and identity-provider settings. Use a URL-safe database password or URL-encode its reserved characters in `DATABASE_URL` when adapting the deployment.
+2. Generate a Fernet key with `uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`; store it securely as `ROUTER_SECRET_KEY`. Preserve it across restarts and replicas.
+3. Register `https://YOUR_DOMAIN/auth/callback` with your OIDC provider. Enable MFA and appropriate signup controls there.
+4. Point the domain to the deployment, then run `docker compose --env-file .env.saas up --build -d`.
+5. Follow [Database operations](deploy/DATABASE_OPERATIONS.md) for schema upgrades and recovery. Complete the authentication, backup/restore, egress, abuse-protection and load checks documented in the readiness file before accepting public traffic.
 
-## Request path
+SaaS startup rejects missing OIDC/HTTPS/PostgreSQL configuration. Browser sessions use secure HTTP-only cookies and CSRF checks. API keys are project-scoped, stored as hashes, displayed once and expire after 90 days. Members share project conversations; reports and connection/key administration require an administrator role. Projects are the isolation boundary, not individual members.
 
-1. **Eligibility.** Residency, modality, context length, the latency ceiling, and the denylist. A model that fails one of these is out, with a reason.
-2. **Analysis.** One eligible model is used as-is. An image goes to the vision model. Otherwise Jev chooses among the eligible ids. A low-confidence choice falls back to the ranking policy, and a short follow-up can stay with the previous model.
-3. **Ranking.** Score is task quality, minus a cost term and an expected-latency term. The top model answers. The next model is the fallback.
-4. **Execution.** One retry on the same model, then one fallback. A rate limit skips that provider for the rest of the turn.
-5. **Checks.** Optional JSON schema validation, and an optional verifier that is not the model that wrote the answer.
+## Integrate your application
 
-Each turn is appended to `data/traces.jsonl`. That file, and uploaded images under `data/uploads/`, are local and are not committed.
+Create a key under **Workspace > Account** and point your Chat Completions client to `/v1`. Use `model="auto"` or a configured Router alias. See [INTEGRATIONS.md](INTEGRATIONS.md) for examples, streaming, images, tools, idempotency and compatibility limits.
 
-## Tests
+## Development checks
 
-```bash
-uv run python -m unittest discover -s tests
+```powershell
+uv run --locked python -m unittest discover -s tests
+node --check web/app.js
+node --check web/workspace.js
+node --check web/report.js
+node --check web/scene.js
 ```
 
-## Layout
+`tests/preview_saas.py` starts a disposable UI preview on port 8877 using mock responses and a temporary database. It does not call paid providers. `tests/postgres_check.py` additionally checks PostgreSQL concurrent admission and persistence against a dedicated `router_test` database specified through `ROUTER_TEST_DATABASE_URL`.
 
-```
-app.py                         Web entry point
-llm_router/pipeline.py         Eligibility, Jev, ranking
-llm_router/execute.py          Retries, fallback, verification, traces
-llm_router/web.py              Local server, sessions, and the reply payload
-web/                           Page, styles, and the 3D mark
-tests/test_routing.py          Routing and browser-boundary tests
-```
-
-## Third-party assets
-
-The page ships its own fonts and its own copy of Three.js, so the browser never loads a remote script.
-
-- [Three.js](https://github.com/mrdoob/three.js) r170, MIT, in `web/vendor/three.module.min.js`
-- Inter, Newsreader, and JetBrains Mono variable fonts from [Fontsource](https://fontsource.org/), SIL Open Font License, in `web/fonts/`
+The default entry point is `llm_router.service:create_app`. Legacy `llm_router.web`, `llm_router.api.chat_completion`, the CLI and report-export helpers remain for compatibility tests; their configuration and storage are separate from the new service. The broader design is in [PRODUCTION_ARCHITECTURE.md](PRODUCTION_ARCHITECTURE.md).

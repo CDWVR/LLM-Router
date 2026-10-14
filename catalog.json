@@ -1,0 +1,49 @@
+{
+  "models": [
+    {
+      "model_id": "openai/gpt-oss-20b",
+      "provider": "groq",
+      "display_name": "GPT-OSS 20B",
+      "modalities": ["text"],
+      "context_window": 128000,
+      "regions": ["us"],
+      "input_usd_per_million": 0.075,
+      "output_usd_per_million": 0.3,
+      "expected_latency_ms": 400,
+      "output_token_cap": 1024,
+      "max_output_tokens": 65536,
+      "quality": {"chat": 0.86, "code": 0.42, "extract": 0.7, "plan": 0.4},
+      "criteria": "Greetings, short questions, definitions, basic arithmetic, and rewrites."
+    },
+    {
+      "model_id": "openai/gpt-oss-120b",
+      "provider": "groq",
+      "display_name": "GPT-OSS 120B",
+      "modalities": ["text"],
+      "context_window": 128000,
+      "regions": ["us"],
+      "input_usd_per_million": 0.15,
+      "output_usd_per_million": 0.75,
+      "expected_latency_ms": 900,
+      "output_token_cap": 1024,
+      "max_output_tokens": 65536,
+      "quality": {"chat": 0.8, "code": 0.9, "extract": 0.84, "plan": 0.88},
+      "criteria": "Coding, debugging, explaining an algorithm and writing it, proofs, and multi-step planning."
+    },
+    {
+      "model_id": "qwen/qwen3.8-27b",
+      "provider": "groq",
+      "display_name": "Qwen 3.8 27B",
+      "modalities": ["text", "image"],
+      "context_window": 128000,
+      "regions": ["us"],
+      "input_usd_per_million": 0.2,
+      "output_usd_per_million": 0.8,
+      "expected_latency_ms": 1000,
+      "output_token_cap": 1024,
+      "max_output_tokens": 65536,
+      "quality": {"chat": 0.55, "code": 0.6, "extract": 0.58, "plan": 0.62, "image": 0.9},
+      "criteria": "Image understanding, OCR, charts, and questions about an attached picture."
+    }
+  ]
+}

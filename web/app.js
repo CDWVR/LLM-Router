@@ -39,6 +39,8 @@ const REJECTIONS = {
   latency_ceiling: "Too slow for the time limit",
   residency: "Not available in the allowed region",
   denylist: "Blocked by policy",
+  cost_ceiling: "Cannot fit within the remaining budget",
+  provider_not_configured: "Provider key is missing or the connection is disabled",
 };
 const FAILURES = {
   rate_limited: "rate-limited",
@@ -46,6 +48,13 @@ const FAILURES = {
   call_failed: "call failed",
 };
 const ERRORS = {
+  router_busy: { title: "Router is finishing another request", text: "Wait for it to finish, then try again.", action: "retry" },
+  provider_not_configured: { title: "Provider needs setup", text: "Open Models & connections to check which providers are configured.", action: "edit" },
+  provider_auth_failed: { title: "Provider rejected its credentials", text: "Check the provider key on the server, then try again.", action: "retry" },
+  cost_budget_exceeded: { title: "The request exhausted its budget", text: "No further model calls were made. Shorten the conversation or review the server budget.", action: "edit" },
+  output_validation_failed: { title: "The answer failed its format check", text: "No accepted answer was returned.", action: "retry" },
+  verification_rejected: { title: "The second opinion found a problem", text: "The proposed answer was withheld. Try rephrasing or requesting more context.", action: "edit" },
+  verification_unavailable: { title: "The answer could not be double-checked", text: "A different eligible model, time, and budget are needed. The unchecked answer was withheld.", action: "edit" },
   network: { title: "Can't reach Router", text: "The local server isn't responding. Check that app.py is still running.", action: "retry" },
   rate_limited: { title: "The provider is rate-limiting requests", text: "Wait a few seconds, then try again.", action: "retry" },
   latency_budget_exceeded: { title: "That took too long", text: "The reply ran past the time limit.", action: "retry" },
@@ -58,6 +67,7 @@ const ERRORS = {
   invalid_image: { title: "That file isn't a supported image", text: "Use a PNG, JPEG, GIF or WebP file.", action: "edit" },
   empty_message: { title: "The message was empty", text: "Write something, then send.", action: "edit" },
   forbidden: { title: "Your session expired", text: "Reload the page to start a new session.", action: "reload" },
+  locked: { title: "This router is locked", text: "Enter the passphrase to continue.", action: "unlock" },
 };
 const ICONS = {
   chevron: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 5.5l4.5 4.5L8 14.5"/></svg>',
@@ -95,7 +105,8 @@ function icon(name) {
 }
 
 function modelColor(index) {
-  return MODEL_COLORS[index] || "var(--accent)";
+  if (index == null || index < 0) return "var(--accent)";
+  return MODEL_COLORS[index % MODEL_COLORS.length];
 }
 
 function percent(value) {
@@ -124,8 +135,10 @@ function taskLabel(task) {
 }
 
 function sourceSentence(view) {
+  if (view.used_fallback) return `${view.routed_model_name} was the first choice. ${view.model_name} answered after recovery.`;
   const pct = percent(view.confidence);
   switch (view.analysis_source) {
+    case "user_selected": return "You selected this model. It passed the eligibility checks.";
     case "jev":
       return pct == null ? "Jev chose this model for the question." : `Jev chose this model with ${pct}% confidence.`;
     case "jev_low_confidence_policy":
@@ -133,7 +146,7 @@ function sourceSentence(view) {
     case "jev_low_confidence_stickiness":
       return "Jev wasn't confident, and this is a short follow-up, so the previous model continued.";
     case "fallback_heuristic":
-      return "Jev was unavailable, so the ranking policy made the call.";
+      return "The local task classifier and ranking policy made the call.";
     case "single_eligible":
       return "Only one model could take this request.";
     case "modality":
@@ -216,7 +229,7 @@ function syncKeyboard() {
 /* Composer */
 
 function updateSend() {
-  sendButton.disabled = busy || !message.value.trim();
+  sendButton.disabled = !busy && !message.value.trim();
 }
 
 function autosize() {
@@ -271,8 +284,9 @@ function dismissHint() {
 function setBusy(on) {
   busy = on;
   sendButton.classList.toggle("busy", on);
-  sendButton.setAttribute("aria-label", on ? "Working" : "Send");
-  updateSend();
+  sendButton.setAttribute("aria-label", on ? "Stop" : "Send");
+  if (on) sendButton.disabled = false;
+  else updateSend();
 }
 
 /* Thread */
@@ -312,11 +326,12 @@ function addPending() {
     current = to;
     nodes[current].classList.add("active");
   };
-  const timers = [
-    window.setTimeout(() => { advance(1); document.title = "Choosing a model… · Router"; }, 350),
-    window.setTimeout(() => { advance(2); document.title = "Writing… · Router"; emit("writing"); }, 1600),
-  ];
-  article.stop = () => timers.forEach(window.clearTimeout);
+  article.phase = (phase) => {
+    const index = { eligibility: 0, analysis: 1, writing: 2 }[phase];
+    if (index != null && index !== current) advance(index);
+    document.title = `${phase === "verification" ? "Checking answer" : labels[index] || "Working"}… · Router`;
+  };
+  article.stop = () => {};
   return article;
 }
 
@@ -376,7 +391,7 @@ function addAssistant(view, reveal = false) {
   why.setAttribute("aria-haspopup", "dialog");
   why.setAttribute("aria-label", `Why ${view.model_name} was chosen`);
   const pct = percent(view.confidence);
-  const meta = pct == null ? taskLabel(view.task) : `${taskLabel(view.task)} · ${pct}%`;
+  const meta = pct == null ? taskLabel(view.task) : `${taskLabel(view.task)} · Route ${pct}%`;
   why.append(el("span", "dot"), el("span", "why-name", view.model_name), el("span", "why-meta", meta), icon("chevron"));
   why.lastElementChild.classList.add("why-chevron");
   why.addEventListener("click", () => openPanel(view, why));
@@ -389,13 +404,21 @@ function addAssistant(view, reveal = false) {
     reading.classList.add("reveal");
   }
 
-  article.append(why, reading, buildActions(reading));
+  article.append(why, reading, answerStatus(view), buildActions(reading, view.request_id));
   thread.append(article);
   markLatest(article);
   return article;
 }
 
-function buildActions(reading) {
+function answerStatus(view) {
+  const detail = [duration(view.elapsed_ms)];
+  if (view.reserved_usd != null) detail.push(`Budget reserved $${Number(view.reserved_usd).toFixed(4)}`);
+  if (view.verification === "accept") detail.push("Second opinion accepted");
+  if (view.truncated) detail.push("Output limit reached — the reply may be incomplete");
+  return el("p", "answer-status", detail.join(" · "));
+}
+
+function buildActions(reading, requestId) {
   const actions = el("div", "msg-actions");
   const copy = actionButton("copy", "Copy reply");
   copy.addEventListener("click", () => copyText(reading.innerText, copy));
@@ -409,7 +432,7 @@ function buildActions(reading) {
       up.disabled = true;
       down.disabled = true;
       try {
-        await api("/label", { label });
+        await api("/label", { label, request_id: requestId });
         button.setAttribute("aria-pressed", "true");
         note.textContent = "Thanks — logged for routing quality";
       } catch {
@@ -515,7 +538,7 @@ function openLive() {
 function paintLiveModel(live, preview) {
   const name = unbreakable(preview.model_name || preview.model_id);
   const pct = percent(preview.confidence);
-  const meta = pct == null ? taskLabel(preview.task) : `${taskLabel(preview.task)} · ${pct}%`;
+  const meta = pct == null ? taskLabel(preview.task) : `${taskLabel(preview.task)} · Route ${pct}%`;
   live.article.style.setProperty("--model", modelColor(preview.model_index));
   const chevron = icon("chevron");
   chevron.classList.add("why-chevron");
@@ -534,7 +557,8 @@ function finishLive(live, view) {
     live.why.addEventListener("click", () => openPanel(live.view, live.why));
   }
   live.view = view;
-  live.article.append(buildActions(live.reading));
+  live.article.querySelector(".live-status")?.remove();
+  live.article.append(answerStatus(view), buildActions(live.reading, view.request_id));
   markLatest(live.article);
 }
 
@@ -557,19 +581,90 @@ async function readSse(response, onEvent) {
         else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
       }
       if (data.length) onEvent(name, JSON.parse(data.join("\n")));
-      if ((name === "model" || name === "delta") && buffer.indexOf("\n\n") === -1) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
       cut = buffer.indexOf("\n\n");
     }
   }
 }
 
+// Batch incoming tokens to avoid a DOM write for every token without delaying reading.
+function createReveal(live) {
+  let pending = "";
+  let timer = 0;
+  let halted = false;
+
+  function step() {
+    timer = 0;
+    if (!pending) return;
+    const count = Math.min(pending.length, 8192);
+    live.reading.append(document.createTextNode(pending.slice(0, count)));
+    pending = pending.slice(count);
+    followStream();
+    if (pending) timer = window.setTimeout(step, 16);
+  }
+
+  return {
+    add(text) {
+      if (!text || halted) return;
+      if (reduced) {
+        live.reading.append(document.createTextNode(text));
+        followStream();
+        return;
+      }
+      pending += text;
+      if (!timer) step();
+    },
+    clear() {
+      pending = "";
+      if (timer) window.clearTimeout(timer);
+      timer = 0;
+      live.reading.replaceChildren();
+    },
+    cancel() {
+      halted = true;
+      pending = "";
+      if (timer) window.clearTimeout(timer);
+      timer = 0;
+    },
+    drain() {
+      if (reduced || halted || !pending) return Promise.resolve();
+      return new Promise((resolve) => {
+        const wait = () => {
+          if (halted || !pending) resolve();
+          else window.setTimeout(wait, 40);
+        };
+        wait();
+      });
+    },
+  };
+}
+
+let turnAbort = null;
+
+function settleStopped(live, payload, userArticle) {
+  if (!live) return;
+  live.reading.classList.remove("live");
+  const row = el("div", "stopped");
+  const retry = el("button", "button", "Try again");
+  retry.type = "button";
+  retry.addEventListener("click", () => {
+    row.remove();
+    send(payload, userArticle);
+  });
+  row.append(el("span", null, "Stopped"), retry);
+  live.article.append(row);
+}
+
 async function send(payload, userArticle) {
+  if (busy) return;
+  payload.client_request_id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
   setBusy(true);
   emit("routing");
   const pending = addPending();
   let live = null;
+  let reveal = null;
+  const abort = new AbortController();
+  turnAbort = abort;
+  abort.clientRequestId = payload.client_request_id;
   scrollToEnd();
   try {
     let response;
@@ -578,8 +673,10 @@ async function send(payload, userArticle) {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf, "Accept": "text/event-stream" },
         body: JSON.stringify(payload),
+        signal: abort.signal,
       });
-    } catch {
+    } catch (error) {
+      if (error && error.name === "AbortError") throw error;
       throw { error: "network" };
     }
     const type = response.headers.get("content-type") || "";
@@ -591,46 +688,76 @@ async function send(payload, userArticle) {
     let failed = null;
     let finished = null;
     await readSse(response, (name, data) => {
-      if (name === "model") {
+      if (name === "phase") {
+        pending.phase(data.phase);
+        $("progress-status").textContent = { eligibility: "Checking eligible models", analysis: "Choosing a model", writing: "Generating an answer", verification: "Checking the answer" }[data.phase] || "Working";
+        if (live && data.phase === "verification") {
+          live.article.querySelector(".live-status")?.remove();
+          live.article.append(el("p", "live-status", "Checking the answer with another model…"));
+        }
+      } else if (name === "model") {
         pending.stop();
         pending.remove();
         live = live || openLive();
+        reveal = reveal || createReveal(live);
         paintLiveModel(live, data);
         document.title = "Writing… · Router";
         emit("writing");
         followStream();
-      } else if (name === "delta" && live) {
-        live.reading.append(document.createTextNode(data.text || ""));
-        followStream();
-      } else if (name === "reset" && live) {
-        live.reading.replaceChildren();
+      } else if (name === "delta" && reveal) {
+        reveal.add(data.text || "");
+      } else if (name === "reset" && reveal) {
+        reveal.clear();
       } else if (name === "done") {
         pending.stop();
         pending.remove();
-        if (live) finishLive(live, data);
-        else live = { article: addAssistant(data, true) };
         finished = data;
       } else if (name === "error") {
         failed = data;
       }
     });
-    if (failed) throw failed;
+    if (abort.signal.aborted) throw new DOMException("Stopped", "AbortError");
+    if (failed) {
+      if (reveal) reveal.cancel();
+      throw failed;
+    }
     if (!finished) throw { error: "model_call_failed" };
+    if (live && reveal) {
+      await reveal.drain();
+      if (abort.signal.aborted) throw new DOMException("Stopped", "AbortError");
+      finishLive(live, finished);
+    } else {
+      live = { article: addAssistant(finished, true) };
+    }
     if (finished.image_attached) {
       hasLastImage = true;
       reuse.hidden = false;
       layout(true);
     }
     emit("done", finished.model_index);
+    $("progress-status").textContent = `Answer ready from ${finished.model_name}${finished.verification === "accept" ? ", second opinion accepted" : ""}.`;
     followStream();
   } catch (error) {
     pending.stop();
     pending.remove();
-    if (live) live.article.remove();
-    addError(error, payload, userArticle);
-    emit("error");
-    scrollToEnd();
+    if (error && error.name === "AbortError") {
+      if (reveal) reveal.cancel();
+      if (live && live.reading.textContent) settleStopped(live, payload, userArticle);
+      emit("idle");
+    } else {
+      if (reveal) reveal.cancel();
+      if (live) live.article.remove();
+      if (error && error.error === "locked") {
+        showGate();
+        emit("idle");
+      } else {
+        addError(error, payload, userArticle);
+        emit("error");
+        scrollToEnd();
+      }
+    }
   } finally {
+    if (turnAbort === abort) turnAbort = null;
     setBusy(false);
     document.title = "Router";
   }
@@ -638,9 +765,16 @@ async function send(payload, userArticle) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (busy) {
+    if (turnAbort) {
+      api("/cancel", { client_request_id: turnAbort.clientRequestId }).catch(() => {});
+      turnAbort.abort();
+    }
+    return;
+  }
   const text = message.value.trim();
-  if (!text || busy) return;
-  if (pendingReset) await commitReset();
+  if (!text) return;
+  if (pendingReset && !await commitReset()) return;
   const payload = { message: text, verify: verify.getAttribute("aria-pressed") === "true" };
   let imageAttached = false;
   if (chosenFile) {
@@ -729,7 +863,7 @@ function buildPanel(view) {
   );
   step("Analysis", sourceSentence(view));
   if (candidates.length) {
-    step("Ranking", `Scored on ${taskLabel(view.task).toLowerCase()} quality and expected speed. ${candidates[0].name} ranked first.`);
+    step("Ranking", `Compared ${taskLabel(view.task).toLowerCase()} quality, expected speed, and estimated cost. ${candidates[0].name} was the first execution choice; a confident router preference can override the numerical score.`);
   }
   const failed = attempts.filter((row) => row.error);
   if (failed.length) {
@@ -764,7 +898,7 @@ function buildPanel(view) {
       head.append(el("span", "score", `score ${Number(row.score).toFixed(2)}`));
       item.append(
         head,
-        meter("Quality", row.quality, `${Math.round(row.quality * 100)}%`),
+        meter(row.quality_source === "measured" ? "Measured" : "Estimate", row.quality, `${Math.round(row.quality * 100)}%`),
         meter("Speed", fastest / (row.latency_ms || fastest), duration(row.latency_ms)),
       );
       list.append(item);
@@ -773,7 +907,7 @@ function buildPanel(view) {
     fragment.append(section);
   }
 
-  fragment.append(el("p", "footnote", "Quality and speed come from Router's model catalog. The score combines both; the model with the highest score answers unless Jev confidently picks another."));
+  fragment.append(el("p", "footnote", "Estimate is catalog quality; Measured is the observed pass rate after at least 20 ratings. Route confidence describes model choice, not answer correctness. Scores combine quality, cost, and speed. Budget reservations use configured prices and conservative token estimates; they are not an invoice."));
   return fragment;
 }
 
@@ -782,8 +916,15 @@ function setInert(on) {
 }
 
 function openPanel(view, trigger) {
+  openDrawer(buildPanel(view), "Why this model", trigger);
+}
+
+let panelCloseTimer;
+function openDrawer(content, title, trigger) {
+  clearTimeout(panelCloseTimer);
   panelTrigger = trigger;
-  panelBody.replaceChildren(buildPanel(view));
+  $("panel-title").textContent = title;
+  panelBody.replaceChildren(content);
   panelBody.scrollTop = 0;
   scrim.hidden = false;
   panel.hidden = false;
@@ -803,7 +944,7 @@ function closePanel() {
   scrim.classList.remove("open");
   panel.classList.remove("open");
   setInert(false);
-  window.setTimeout(() => {
+  panelCloseTimer = window.setTimeout(() => {
     scrim.hidden = true;
     panel.hidden = true;
   }, reduced ? 0 : 250);
@@ -835,6 +976,26 @@ panel.addEventListener("keydown", (event) => {
 $("panel-close").addEventListener("click", closePanel);
 scrim.addEventListener("click", closePanel);
 
+$("connections").addEventListener("click", async () => {
+  try {
+    const response = await fetch("/state");
+    if (!response.ok) throw new Error("state");
+    const state = await response.json();
+    const content = el("div", "connections-content");
+    content.append(el("h3", null, "Bring your own models"), el("p", "connection-copy", "Connect OpenAI, Anthropic, Groq, OpenRouter, or your own compatible endpoint. Keys stay on this server."));
+    for (const provider of state.providers || []) {
+      const row = el("section", "connection-row");
+      row.append(el("strong", null, provider.name), el("span", provider.configured ? "connection-ready" : "connection-missing", provider.configured ? "Configured" : provider.enabled ? "Key needed" : "Disabled"));
+      const models = (state.models || []).filter((model) => model.provider === provider.name);
+      row.append(el("p", "connection-copy", models.length ? models.map((m) => `${m.name} (${m.modalities.join(", ")})`).join(" · ") : "No enabled models in the catalog"));
+      content.append(row);
+    }
+    content.append(el("p", "connection-copy", "To connect: set the provider key in .env, then add its model to catalog.json. Custom endpoints go in providers.json. See INTEGRATIONS.md for examples and API access. Configured means credentials are present; it does not confirm account access or model health."));
+    if (state.catalog_error) content.append(el("p", "connection-missing", "The catalog has an error. The previous valid models are still in use."));
+    openDrawer(content, "Models & connections", $("connections"));
+  } catch { toast("Couldn't load connections. Check that Router is running."); }
+});
+
 /* Toasts and reset */
 
 function toast(text, actionLabel, onAction, ttl = 3200) {
@@ -860,12 +1021,24 @@ function toast(text, actionLabel, onAction, ttl = 3200) {
 }
 
 async function commitReset() {
-  if (!pendingReset) return;
+  if (!pendingReset) return true;
   const current = pendingReset;
   pendingReset = null;
   window.clearTimeout(current.timer);
   current.dismiss();
-  try { await api("/reset", {}); } catch { /* the next turn reports connection problems */ }
+  setBusy(true);
+  try {
+    await api("/reset", {});
+    verify.setAttribute("aria-pressed", "false");
+    return true;
+  } catch {
+    thread.append(...current.nodes);
+    hasLastImage = current.hadImage;
+    reuse.hidden = !hasLastImage;
+    setMode("chat", true);
+    toast("Couldn't clear the thread. The previous conversation was restored.");
+    return false;
+  } finally { setBusy(false); }
 }
 
 reset.addEventListener("click", () => {
@@ -890,7 +1063,7 @@ reset.addEventListener("click", () => {
     scrollToEnd(false);
   };
   const dismiss = toast("Thread cleared", "Undo", undo, 5000);
-  pendingReset = { dismiss, timer: window.setTimeout(commitReset, 5000) };
+  pendingReset = { dismiss, nodes, hadImage, timer: window.setTimeout(commitReset, 5000) };
   message.focus({ preventScroll: true });
 });
 
@@ -907,6 +1080,7 @@ window.addEventListener("pagehide", () => {
 /* Inputs */
 
 message.addEventListener("keydown", (event) => {
+  if (busy) return;
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     form.requestSubmit();
@@ -976,7 +1150,7 @@ window.visualViewport?.addEventListener("resize", () => {
   layout(true);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "/" && document.activeElement !== message && panel.hidden) {
+  if (event.key === "/" && document.activeElement !== message && panel.hidden && gate.hidden && !document.querySelector("dialog[open]")) {
     event.preventDefault();
     message.focus();
   }
@@ -992,13 +1166,72 @@ layout(true);
 requestAnimationFrame(() => orb.classList.add("ready"));
 document.fonts?.ready.then(() => layout(true));
 
-fetch("/state")
-  .then((response) => response.json())
-  .then((state) => {
-    if (!state.turns || !state.turns.length) {
-      message.focus({ preventScroll: true });
+const gate = document.getElementById("gate");
+const gateForm = document.getElementById("gate-form");
+const gateError = document.getElementById("gate-error");
+const gatePassword = document.getElementById("gate-password");
+
+function showGate() {
+  gate.hidden = false;
+  setInert(true);
+  gatePassword.focus();
+}
+
+function hideGate() {
+  gate.hidden = true;
+  setInert(false);
+  gateError.hidden = true;
+  gatePassword.value = "";
+}
+
+gateForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!gatePassword.value.trim()) {
+    gateError.textContent = "Enter your passphrase to continue.";
+    gateError.hidden = false;
+    gatePassword.focus();
+    return;
+  }
+  gateError.textContent = "That passphrase doesn't match.";
+  gateError.hidden = true;
+  try {
+    await api("/unlock", { password: gatePassword.value });
+  } catch (error) {
+    if (error && error.error === "unlock_rate_limited") {
+      gateError.textContent = "Too many attempts. Wait five minutes and try again.";
+      gateError.hidden = false;
       return;
     }
+    if (error && error.error === "locked") {
+      gateError.hidden = false;
+      gatePassword.select();
+      return;
+    }
+    gateError.hidden = false;
+    return;
+  }
+  hideGate();
+  const restored = await fetch("/state").then((response) => response.json()).catch(() => null);
+  if (restored && !thread.children.length) restoreState(restored);
+  message.focus({ preventScroll: true });
+});
+
+function restoreState(state) {
+  if (state.external_login) {
+    showGate();
+    gateForm.replaceChildren(el("h2", null, "Your models. Your workspace."), el("p", "gate-copy", "Sign in to your account to continue."));
+    const signIn = el("a", "gate-continue", "Sign in securely");
+    signIn.href = "/login";
+    gateForm.append(signIn);
+    signIn.focus();
+    return;
+  }
+  if (state.catalog_error) toast("catalog.json could not be read. The previous models are still in use.");
+  if (state.locked) showGate();
+  if (!state.turns || !state.turns.length) {
+    if (!state.locked) message.focus({ preventScroll: true });
+    return;
+  }
     hasLastImage = Boolean(state.has_image);
     reuse.hidden = !hasLastImage;
     if (state.verify) verify.setAttribute("aria-pressed", "true");
@@ -1013,5 +1246,9 @@ fetch("/state")
     setMode("chat", true);
     emit("done", lastModel);
     scrollToEnd(false);
-  })
+}
+
+fetch("/state")
+  .then((response) => response.json())
+  .then((state) => restoreState(state))
   .catch(() => message.focus({ preventScroll: true }));

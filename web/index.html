@@ -19,6 +19,12 @@
       <span class="brand-slot" id="brand-slot"></span>
       <span class="brand-name">Router</span>
     </a>
+    <button type="button" id="connections" class="ghost" aria-label="Models and connections" aria-haspopup="dialog">Models</button>
+    <button type="button" id="workspace-open" class="ghost" aria-label="Open workspace" aria-haspopup="dialog"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="12" y="3" width="5" height="5" rx="1"/><rect x="3" y="12" width="5" height="5" rx="1"/><rect x="12" y="12" width="5" height="5" rx="1"/></svg><span>Workspace</span></button>
+    <button type="button" id="report-bug" class="ghost" aria-label="Report a bug" aria-haspopup="dialog">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 8h8v5a4 4 0 0 1-8 0V8ZM8 8V6a2 2 0 0 1 4 0v2M3 10h3m8 0h3M3 14h3m8 0h3M5 5l2 3m6 0 2-3"/></svg>
+      <span>Report a bug</span>
+    </button>
     <button type="button" id="reset" class="ghost" hidden>
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>
       <span>New thread</span>
@@ -45,7 +51,7 @@
       </ul>
     </section>
 
-    <div id="thread" class="thread" role="log" aria-live="polite" aria-label="Conversation"></div>
+  <div id="thread" class="thread" role="log" aria-live="off" aria-label="Conversation"></div>
   </main>
 
   <button type="button" id="to-bottom" class="to-bottom" aria-label="Scroll to latest" hidden>
@@ -73,6 +79,7 @@
       </label>
       <button type="submit" class="send" id="send" aria-label="Send" disabled>
         <svg class="send-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15.5V4.5M5 9.5l5-5 5 5"/></svg>
+        <svg class="send-stop" viewBox="0 0 20 20" aria-hidden="true"><rect x="6.5" y="6.5" width="7" height="7" rx="1.5"/></svg>
         <span class="send-spin" aria-hidden="true"></span>
       </button>
     </div>
@@ -102,9 +109,43 @@
     <div class="panel-body" id="panel-body"></div>
   </aside>
 
+  <div class="gate" id="gate" hidden>
+    <form id="gate-form" class="gate-card" novalidate>
+      <p class="gate-kicker">Router</p>
+      <h2>This machine is locked.</h2>
+      <p class="gate-copy">Enter the passphrase from this computer's environment to send a message.</p>
+      <label class="gate-field">
+        <span class="sr">Passphrase</span>
+        <input id="gate-password" type="password" autocomplete="current-password" placeholder="Passphrase" required>
+      </label>
+      <p id="gate-error" class="gate-error" hidden>That passphrase doesn't match.</p>
+      <button type="submit" class="gate-continue">Continue</button>
+    </form>
+  </div>
+
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <div class="sr" id="progress-status" role="status" aria-live="polite"></div>
+
+  <div id="capture-flash" aria-hidden="true" data-html2canvas-ignore></div>
+  <dialog id="report-dialog" aria-labelledby="report-title" data-html2canvas-ignore>
+    <form id="report-form" novalidate>
+      <header class="report-head"><div><p class="report-eyebrow">Help improve Router</p><h2 id="report-title">Something not quite right?</h2></div><button type="button" id="report-close" class="icon-ghost" aria-label="Close bug report">×</button></header>
+      <div class="report-content">
+        <div class="report-preview" id="report-preview"><img id="report-image" alt="Preview of the captured app screen" hidden><p id="report-capture-status" role="status">Capturing this view…</p></div>
+        <div class="report-image-tools"><span>Visible page only · preview before saving</span><button type="button" id="report-redact" aria-pressed="false">Redact areas</button><button type="button" id="report-remove">Remove screenshot</button></div>
+        <label for="report-description">What went wrong?</label>
+        <textarea id="report-description" maxlength="4000" rows="4" placeholder="What were you trying to do, and what happened instead?" aria-describedby="report-help report-error"></textarea>
+        <div class="report-help"><span id="report-help">At least 10 characters. Screenshot is optional.</span><span id="report-count">0 / 4000</span></div>
+        <p class="report-error" id="report-error" role="alert" hidden></p>
+        <p class="report-result" id="report-result" role="status" hidden></p>
+      </div>
+      <footer class="report-footer"><p>Saved privately on this server.<br>No automatic GitHub or email submission.</p><button type="submit" id="report-submit">Save report <span aria-hidden="true">↗</span></button></footer>
+    </form>
+  </dialog>
 
   <script type="module" src="/scene.js"></script>
   <script src="/app.js"></script>
+  <script src="/report.js"></script>
+  <script src="/workspace.js"></script>
 </body>
 </html>

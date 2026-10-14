@@ -212,7 +212,9 @@ const worldTarget = new THREE.Vector3();
 const linkPoint = new THREE.Vector3();
 
 function update(dt, time, still) {
-  const selected = state.phase === "done" && state.selected >= 0 ? models[state.selected] : null;
+  const selected = state.phase === "done" && state.selected >= 0 && state.selected < models.length
+    ? models[state.selected]
+    : null;
   if (state.phase === "done" && time - state.since > 4) {
     state.phase = "idle";
   }

@@ -1,0 +1,55 @@
+{
+  "models": [
+    {
+      "model_id": "my-openai",
+      "upstream_model_id": "YOUR_OPENAI_MODEL_ID",
+      "provider": "openai",
+      "display_name": "My OpenAI model",
+      "enabled": false,
+      "modalities": ["text"],
+      "context_window": 8192,
+      "regions": ["us"],
+      "input_usd_per_million": 1.0,
+      "output_usd_per_million": 5.0,
+      "expected_latency_ms": 1500,
+      "output_token_cap": 2048,
+      "max_output_tokens": 2048,
+      "quality": {"chat": 0.5, "code": 0.5, "extract": 0.5, "plan": 0.5},
+      "criteria": "A general-purpose text model for conversation, code, and planning."
+    },
+    {
+      "model_id": "my-claude",
+      "upstream_model_id": "YOUR_ANTHROPIC_MODEL_ID",
+      "provider": "anthropic",
+      "display_name": "My Claude model",
+      "enabled": false,
+      "modalities": ["text"],
+      "context_window": 8192,
+      "regions": ["us"],
+      "input_usd_per_million": 1.0,
+      "output_usd_per_million": 5.0,
+      "expected_latency_ms": 1500,
+      "output_token_cap": 2048,
+      "max_output_tokens": 2048,
+      "quality": {"chat": 0.5, "code": 0.5, "extract": 0.5, "plan": 0.5},
+      "criteria": "A general-purpose text model for conversation, code, and planning."
+    },
+    {
+      "model_id": "my-local-model",
+      "upstream_model_id": "YOUR_INSTALLED_LOCAL_MODEL",
+      "provider": "local",
+      "display_name": "My local model",
+      "enabled": false,
+      "modalities": ["text"],
+      "context_window": 8192,
+      "regions": ["us"],
+      "input_usd_per_million": 0,
+      "output_usd_per_million": 0,
+      "expected_latency_ms": 2000,
+      "output_token_cap": 2048,
+      "max_output_tokens": 2048,
+      "quality": {"chat": 0.5},
+      "criteria": "Local text generation for simple chat and private experimentation."
+    }
+  ]
+}

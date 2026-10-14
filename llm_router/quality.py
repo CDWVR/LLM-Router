@@ -1,9 +1,14 @@
 import json
+import math
 from pathlib import Path
+from llm_router.trace import TRACE_LOCK
 
 POLICY_PATH = Path("data/policy.json")
+QUALITY_TABLE_PATH = Path("data/quality_table.json")
+# One rating must not move the ranker. A rate is used only after this many labels.
+QUALITY_MIN_SAMPLES = 20
 DEFAULT_POLICY = {
-    "quality_table": None,
+    "quality_table": str(QUALITY_TABLE_PATH),
     "candidate_quality_table": None,
     "shadow": False,
     "canary_fraction": 0,
@@ -13,7 +18,12 @@ DEFAULT_POLICY = {
 def load_policy(path: Path = POLICY_PATH) -> dict:
     if not path.exists():
         return dict(DEFAULT_POLICY)
-    loaded = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            return dict(DEFAULT_POLICY)
+    except (OSError, ValueError):
+        return dict(DEFAULT_POLICY)
     policy = dict(DEFAULT_POLICY)
     policy.update(loaded)
     return policy
@@ -25,20 +35,26 @@ def load_rates(path: str | None) -> dict:
     table_path = Path(path)
     if not table_path.exists():
         return {}
-    table = json.loads(table_path.read_text(encoding="utf-8"))
-    min_samples = int(table.get("min_samples", 1))
-    rates = {}
-    for model_id, tasks in (table.get("rates") or {}).items():
-        for task_type, cell in tasks.items():
-            if int(cell.get("n", 0)) >= min_samples:
-                rates[(model_id, task_type)] = float(cell["rate"])
-    return rates
+    try:
+        table = json.loads(table_path.read_text(encoding="utf-8"))
+        min_samples = max(QUALITY_MIN_SAMPLES, int(table.get("min_samples", QUALITY_MIN_SAMPLES)))
+        rates = {}
+        for model_id, tasks in (table.get("rates") or {}).items():
+            for task_type, cell in tasks.items():
+                rate = float(cell["rate"])
+                if int(cell.get("n", 0)) >= min_samples and math.isfinite(rate) and 0 <= rate <= 1:
+                    rates[(model_id, task_type)] = rate
+        return rates
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {}
 
 
 def build_quality_table(traces_path: Path, output_path: Path, min_samples: int = 1) -> dict:
     counts: dict[tuple[str, str], list[int]] = {}
     if traces_path.exists():
-        for line in traces_path.read_text(encoding="utf-8").splitlines():
+        with TRACE_LOCK:
+            lines = traces_path.read_text(encoding="utf-8").splitlines()
+        for line in lines:
             if not line.strip():
                 continue
             record = json.loads(line)
@@ -61,12 +77,22 @@ def build_quality_table(traces_path: Path, output_path: Path, min_samples: int =
         }
     table = {"min_samples": min_samples, "rates": rates}
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(table, indent=2), encoding="utf-8")
+    with TRACE_LOCK:
+        temporary = output_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(table, indent=2), encoding="utf-8")
+        temporary.replace(output_path)
     return table
 
 
+def refresh_quality_table(traces_path: Path, output_path: Path = QUALITY_TABLE_PATH) -> None:
+    try:
+        build_quality_table(traces_path, output_path, min_samples=QUALITY_MIN_SAMPLES)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return
+
+
 def main() -> None:
-    table = build_quality_table(Path("data/traces.jsonl"), Path("data/quality_table.json"))
+    table = build_quality_table(Path("data/traces.jsonl"), QUALITY_TABLE_PATH, min_samples=QUALITY_MIN_SAMPLES)
     print(json.dumps(table, indent=2))
 
 

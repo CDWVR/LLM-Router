@@ -1,5 +1,8 @@
 from llm_router.eligibility import estimated_cost
 from llm_router.registry import ModelRecord
+from contextvars import ContextVar
+
+ROUTING_PROFILE = ContextVar("routing_profile", default="balanced")
 
 W_COST = 4.0
 W_LATENCY = 0.0004
@@ -15,7 +18,9 @@ def score_model(
     quality_key = "image" if task_type == "image" else task_type
     measured = (quality_rates or {}).get((model.model_id, quality_key))
     quality = model.quality.get(quality_key, 0.5) if measured is None else measured
-    return quality - W_COST * estimated_cost(model, context_tokens) - W_LATENCY * model.expected_latency_ms
+    weights = {"balanced": (W_COST, W_LATENCY), "fast": (2, .001), "quality": (1, .00002), "private": (W_COST, W_LATENCY)}
+    cost, latency = weights.get(ROUTING_PROFILE.get(), weights["balanced"])
+    return quality - cost * estimated_cost(model, context_tokens) - latency * model.expected_latency_ms
 
 
 def rank_models(
