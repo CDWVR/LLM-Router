@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from dotenv import load_dotenv
 from .migrations import migrate, schema_status
 from .store import Store
+from .configuration import database_url
 
 
 def main():
@@ -14,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["init", "migrate", "status", "cleanup"])
     args = parser.parse_args()
-    url = os.environ.get("DATABASE_URL", "sqlite:///data/workspace.sqlite3")
+    url = database_url(os.environ.get("DATABASE_URL", "sqlite:///data/workspace.sqlite3"))
     if "DATABASE_URL" not in os.environ:
         Path("data").mkdir(exist_ok=True)
     if args.command == "cleanup":

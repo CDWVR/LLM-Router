@@ -33,6 +33,8 @@ def digest(value):
 
 class Store:
     def __init__(self, url, auto_migrate=None):
+        from .configuration import database_url
+        url = database_url(url)
         self.engine = create_engine(url, pool_pre_ping=True, **({"connect_args": {"check_same_thread": False, "timeout": 10}} if url.startswith("sqlite") else {"pool_size": 5, "max_overflow": 5}))
         from .migrations import migrate, check_schema
         try:

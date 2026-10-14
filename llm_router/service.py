@@ -36,6 +36,8 @@ from .messages import conversation_messages
 from .pipeline import NoEligibleModel
 from .store import Store, ServiceError, digest
 from .workspace import Workspace, encryption_key
+from .configuration import database_url as normalize_database_url
+from .probes import ProbeHostBoundary, RAILWAY_PROBE_HOST
 from .web import WEB_ROOT, _decision_view, _model_fields, format_sse
 
 SAFE_ERRORS = {"cost_budget_exceeded", "model_call_failed", "provider_not_configured", "provider_auth_failed", "latency_budget_exceeded", "rate_limited", "output_validation_failed", "verification_unavailable", "verification_rejected", "empty_response", "incomplete_stream"}
@@ -82,7 +84,7 @@ def create_app(database_url=None, secret_key=None, saas=None):
     if saas is None and os.environ.get("ROUTER_DEPLOYMENT", "local") not in {"local", "saas"}:
         raise RuntimeError("ROUTER_DEPLOYMENT must be local or saas")
     saas = os.environ.get("ROUTER_DEPLOYMENT", "local") == "saas" if saas is None else saas
-    database_url = database_url or os.environ.get("DATABASE_URL", "sqlite:///data/workspace.sqlite3")
+    database_url = normalize_database_url(database_url or os.environ.get("DATABASE_URL", "sqlite:///data/workspace.sqlite3"))
     public_url = os.environ.get("ROUTER_PUBLIC_URL", "http://127.0.0.1:8765").rstrip("/")
     issuer = os.environ.get("OIDC_ISSUER", "").rstrip("/")
     if saas and (not database_url.startswith("postgresql+psycopg://") or not public_url.startswith("https://") or not issuer.startswith("https://") or not os.environ.get("OIDC_CLIENT_ID") or not os.environ.get("OIDC_CLIENT_SECRET")):
@@ -657,7 +659,11 @@ def create_app(database_url=None, secret_key=None, saas=None):
     app = Starlette(routes=routes, lifespan=lifespan, exception_handlers={ServiceError: error, APIRequestError: error, ValueError: error})
     app.state.store, app.state.workspace = store, workspace
     app.add_middleware(SessionMiddleware, secret_key=key.decode(), session_cookie="router_oidc", https_only=saas, max_age=600, same_site="lax")
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(public_url).hostname] if saas else ["127.0.0.1", "localhost", "testserver"])
+    hosts = [urlsplit(public_url).hostname] if saas else ["127.0.0.1", "localhost", "testserver"]
+    if saas and os.environ.get("RAILWAY_PROJECT_ID"):
+        hosts.append(RAILWAY_PROBE_HOST)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+    app.add_middleware(ProbeHostBoundary)
     from .abuse import AbuseProtection
     app.add_middleware(AbuseProtection, store=store, key=key, enabled=saas)
     app.add_middleware(SecurityHeaders, saas=saas)

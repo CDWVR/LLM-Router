@@ -10,6 +10,9 @@ from starlette.responses import JSONResponse
 class AbuseProtection:
     def __init__(self, app, store, key, enabled=True):
         self.app, self.store, self.key, self.enabled = app, store, key, enabled
+        self.client_header = os.environ.get("ROUTER_CLIENT_IP_HEADER", "x-router-client-ip").lower()
+        if self.client_header not in {"x-router-client-ip", "x-real-ip"}:
+            raise RuntimeError("Unsupported ROUTER_CLIENT_IP_HEADER")
         self.proxies = [ipaddress.ip_network(value.strip()) for value in os.environ.get("ROUTER_TRUSTED_PROXY_CIDRS", "").split(",") if value.strip()]
 
     def client_identity(self, scope):
@@ -18,7 +21,7 @@ class AbuseProtection:
             address = ipaddress.ip_address(peer)
             if any(address in network for network in self.proxies):
                 # Reverse proxy must overwrite this single-value header.
-                values = [value for key, value in scope.get("headers", []) if key.lower() == b"x-router-client-ip"]
+                values = [value for key, value in scope.get("headers", []) if key.lower() == self.client_header.encode()]
                 if len(values) == 1:
                     address = ipaddress.ip_address(values[0].decode("ascii"))
             peer = str(address)

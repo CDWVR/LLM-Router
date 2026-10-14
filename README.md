@@ -32,6 +32,10 @@ Local data lives in `data/workspace.sqlite3`; the generated encryption key is `d
 
 The screenshot is a DOM reconstruction, not an operating-system screenshot; some effects and canvas content may differ. Review it before submitting. Reports stay in the workspace database; no GitHub issue or external message is sent.
 
+## Deploy on Railway
+
+Use [the Railway deployment guide](deploy/RAILWAY.md) for repository/branch selection, PostgreSQL references, OIDC configuration and required secrets. The included `railway.json` runs migrations before deployment, starts the production server on Railway's `PORT` and checks `/readyz`.
+
 ## Public multi-tenant deployment
 
 The repository includes a non-root Docker image, PostgreSQL, a one-shot migration job and Caddy HTTPS compose configuration, plus an OIDC authentication integration. It is a deployment foundation, not a completed public launch. Read [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the remaining release gates.

@@ -17,7 +17,7 @@ Counters use atomic database upserts, so concurrent requests and application rep
 
 By default, the limiter uses the direct connection's peer IP and ignores all forwarded headers. Behind a proxy this means clients share the proxy's quota until trust is configured.
 
-Set `ROUTER_TRUSTED_PROXY_CIDRS` to the specific IP addresses or controlled network ranges of your reverse proxies. Only connections from these addresses may supply `X-Router-Client-IP`. The included Caddy configuration overwrites that header using the connection's remote address. Other forwarded headers are ignored by the limiter. Invalid or duplicate identity headers fall back to the direct peer address.
+Set `ROUTER_TRUSTED_PROXY_CIDRS` to the specific IP addresses or controlled network ranges of your reverse proxies. Only connections from these addresses may supply `X-Router-Client-IP`. The included Caddy configuration overwrites that header using the connection's remote address. Other forwarded headers are ignored by the limiter. For Railway, `ROUTER_CLIENT_IP_HEADER=x-real-ip` selects its documented single-IP header instead; the same explicit trusted-peer requirement applies. Invalid or duplicate identity headers fall back to the direct peer address.
 
 Do not trust all addresses (`0.0.0.0/0` or `::/0`) or a subnet containing untrusted workloads. Keep application ports private, and ensure the trusted proxy overwrites incoming client identity headers. For compose, reserve an internal proxy address/network appropriate to your infrastructure and set the matching CIDR; the sample deliberately does not assume your Docker subnet. If a CDN precedes Caddy, configure and test that trust chain explicitly; the default sees the CDN peer address.
 
