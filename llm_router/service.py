@@ -268,7 +268,7 @@ def create_app(database_url=None, secret_key=None, saas=None):
                         raise ServiceError("invalid_status")
                     report["status"] = data["status"]
                     report["tags"] = text(data.get("tags", ""), 200, 0)
-                    store.put(project, "report", identifier, report)
+                    store.put(project, "report", identifier, report, expected_revision=data.get("revision", 0))
                 else:
                     raise ServiceError("unknown_action")
             return {"ok": True}

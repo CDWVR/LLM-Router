@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from sqlalchemy import (Column, Float, Integer, BigInteger, JSON, MetaData, String, Table, Text, Index,
                         create_engine, delete, func, insert, select, update)
 
+_UNVERSIONED = object()
+
 metadata = MetaData()
 projects = Table("projects", metadata, Column("id", String(64), primary_key=True), Column("name", String(120)), Column("daily_micro", BigInteger, nullable=False, default=20_000_000))
 members = Table("members", metadata, Column("user_id", String(256), primary_key=True), Column("project_id", String(64), primary_key=True), Column("role", String(16)))
@@ -155,7 +157,9 @@ class Store:
         with self.engine.connect() as db:
             return [{"id": row.id, **row.data, "updated": row.updated} for row in db.execute(select(documents).where(documents.c.project_id == project, documents.c.kind == kind).order_by(documents.c.updated.desc()).limit(limit))]
 
-    def put(self, project, kind, key, value, limit=250, merge=False, preserve=()):
+    def put(self, project, kind, key, value, limit=250, merge=False, preserve=(), expected_revision=_UNVERSIONED):
+        if expected_revision is not _UNVERSIONED and (isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0):
+            raise ServiceError("invalid_revision")
         if len(json.dumps(value)) > 4_000_000:
             raise ServiceError("document_too_large", 413)
         with self.transaction() as db:
@@ -163,6 +167,11 @@ class Store:
             db.execute(select(projects.c.id).where(projects.c.id == project).with_for_update()).first()
             condition = (documents.c.project_id == project) & (documents.c.kind == kind) & (documents.c.id == key)
             existing = db.execute(select(documents.c.data).where(condition)).first()
+            if expected_revision is not _UNVERSIONED:
+                revision = existing[0].get("revision", 0) if existing else 0
+                if revision != expected_revision:
+                    raise ServiceError("configuration_conflict", 409)
+                value = {**value, "revision": revision+1}
             if existing:
                 if merge:
                     value = {**existing[0], **value}

@@ -18,13 +18,17 @@ Status: **implemented SaaS foundation; public launch still requires the release 
 
 ## Verification and practical limits
 
-The regression suite currently has 108 passing tests, including tenant isolation, revocation, CSRF, encrypted credentials, context separation, concurrent budget admission, report-rate concurrency, streaming replay and partial-stream failures. PostgreSQL concurrency/persistence checks have also passed against a disposable database. Browser checks use mock providers so they do not establish real provider compatibility or incur generation charges. The Python dependency advisory scan covered 53 installed packages and reported no known vulnerabilities at scan time; that is not a security audit. The image built successfully; a read-only, non-root container with two workers passed PostgreSQL readiness and unauthenticated API/metrics denial checks. Browser comparison, screenshot reporting, triage and a 390-pixel mobile layout were checked with mock responses; the browser recorded no warnings or errors. JavaScript syntax checks and `git diff --check` also passed. Real OIDC and HTTPS certificate issuance were not exercised.
+The regression suite currently has 113 passing tests, including tenant isolation, revocation, CSRF, encrypted credentials, context separation, concurrent budget admission, report-rate concurrency, streaming replay and partial-stream failures. PostgreSQL concurrency/persistence checks have also passed against a disposable database. Browser checks use mock providers so they do not establish real provider compatibility or incur generation charges. The Python dependency advisory scan covered 53 installed packages and reported no known vulnerabilities at scan time; that is not a security audit. The image built successfully; a read-only, non-root container with two workers passed PostgreSQL readiness and unauthenticated API/metrics denial checks. Browser comparison, screenshot reporting, triage and a 390-pixel mobile layout were checked with mock responses; the browser recorded no warnings or errors. JavaScript syntax checks and `git diff --check` also passed. Real OIDC and HTTPS certificate issuance were not exercised.
 
 The application retains metadata and result records for 90 days; report/attachment cleanup uses a 30-day idle window, and sessions/keys expire. Conversation history remains until an explicit future deletion workflow is implemented. Archive is reversible and does not erase data. Cleanup runs every five minutes. Administrators should document these semantics before onboarding customers.
 
 Provider keys are encrypted; messages, answers, screenshots and metadata are not application-encrypted. Protect database volumes, backups and operator access. Workspace members intentionally share conversations. Report screenshots can contain sensitive visible text even after automatic input masking; users must inspect/redact/remove them.
 
 Metrics are basic retained-record gauges, not a complete historical monitoring system. Set `ROUTER_METRICS_TOKEN`; `/metrics` is forbidden without it. Scrape through a private monitoring path. Audit records are best-effort and bounded; failure is logged without making an already-completed mutation appear to fail. This is not a tamper-evident compliance audit trail.
+
+## Concurrent administration
+
+Connection, model and report edits now compare revisions under the same project transaction that writes the data. A stale editor receives HTTP 409 and cannot overwrite a newer configuration or credential. Existing records start at revision zero; the first protected save advances them, so no schema migration is required. The workspace preserves the unsaved form on conflict and offers an explicit reload action that discards that draft. Refresh open browser tabs after upgrading; older clients cannot update a record once its revision advances.
 
 ## Required before public launch
 
@@ -42,7 +46,7 @@ Metrics are basic retained-record gauges, not a complete historical monitoring s
 | Priority | Improvement | Why / acceptance criterion |
 | --- | --- | --- |
 | P0 | Production-role migration rehearsal, restore drills, OIDC staging suite, edge/egress policy | Repeatable deployment with verified isolation and recoverability |
-| P1 | Optimistic versioning for configuration | Conversation metadata merges transactionally and routing policy uses revisions; extend conflict detection to model, connection and report edits |
+| Delivered | Optimistic versioning for configuration | Routing, models, connections and report triage reject stale revisions; conversation metadata merges transactionally |
 | P0 | Reconciled usage ledger and spend alerts | Attribute every attempt to a project/key/provider; distinguish reservation, estimate and settled charge |
 | P1 | Provider contract test harness | Exercise live provider fixtures on demand and record compatibility without storing secrets |
 | P1 | Evaluation runner and versioned routing policy | Turn saved prompts into repeatable scored suites; compare policy versions before promotion |

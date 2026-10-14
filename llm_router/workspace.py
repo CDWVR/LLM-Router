@@ -48,7 +48,8 @@ class Workspace:
         return connections
 
     def status(self, project):
-        return [{"name": c.name, "adapter": c.adapter, "base_url": c.base_url, "configured": c.configured, "enabled": c.enabled,
+        revisions = {row["id"]: row.get("revision", 0) for row in self.store.list(project, "connection", 50)}
+        return [{"name": c.name, "adapter": c.adapter, "base_url": c.base_url, "configured": c.configured, "enabled": c.enabled, "revision": revisions.get(c.name, 0),
                  "health": self.store.get(project, "health", c.name) or {"status": "untested"}}
                 for c in self.connections(project).values()]
 
@@ -80,7 +81,7 @@ class Workspace:
             raise ServiceError("new_destination_requires_key")
         if config["api_key_env"] and not encrypted:
             raise ServiceError("api_key_required")
-        self.store.put(project, "connection", name, {"config": config, "secret": encrypted}, 30)
+        self.store.put(project, "connection", name, {"config": config, "secret": encrypted}, 30, expected_revision=body.get("revision", 0))
         self.store.remove(project, "health", name)
         return {"ok": True}
 
@@ -118,6 +119,8 @@ class Workspace:
         return saved
 
     def save_model(self, project, body):
+        if not isinstance(body, dict):
+            raise ServiceError("invalid_model")
         if not isinstance(body.get("model_id"), str) or not 1 <= len(body["model_id"]) <= 128:
             raise ServiceError("invalid_model_id")
         token = CONNECTION_SCOPE.set(self.connections(project))
@@ -130,7 +133,7 @@ class Workspace:
         if not isinstance(body.get("enabled", True), bool):
             raise ServiceError("invalid_enabled")
         row["enabled"] = body.get("enabled", True)
-        self.store.put(project, "model", model.model_id, row, 200)
+        self.store.put(project, "model", model.model_id, row, 200, expected_revision=body.get("revision", 0))
         return {"ok": True}
 
     @contextmanager

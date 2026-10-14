@@ -46,6 +46,10 @@ Migrations run against the same database as the previous deployment. Future sche
 
 The container healthcheck and Railway probe both use readiness, including database access. Railway's deployment healthcheck is not ongoing uptime monitoring: configure an external monitor and alerts separately. Test an intentional database failure in staging and confirm readiness returns 503.
 
+## Administration after upgrading
+
+Refresh browser tabs after a deployment to load the latest workspace forms. Model, connection, routing and report edits carry revisions; if another administrator saves first, your save is rejected without overwriting their changes. Copy any draft values you need before choosing **Reload latest (discard draft)**.
+
 ## Staging acceptance checklist
 
 - Pre-deploy exits successfully and reports current schema equal to required schema.

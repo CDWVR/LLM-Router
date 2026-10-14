@@ -31,6 +31,16 @@ def reserve(index):
 with concurrent.futures.ThreadPoolExecutor(8) as pool:
     assert sum(pool.map(reserve, range(8))) == 1, "Concurrent reservations exceeded the budget"
 store.put(project, "thread", "persist", {"title":"Survives restart"})
+store.put(project, "model", "concurrent-edit", {"enabled": True})
+def edit(index):
+    try:
+        store.put(project, "model", "concurrent-edit", {"winner": index}, expected_revision=0)
+        return True
+    except ServiceError as exc:
+        assert exc.code == "configuration_conflict"
+        return False
+with concurrent.futures.ThreadPoolExecutor(8) as pool:
+    assert sum(pool.map(edit, range(8))) == 1, "Concurrent edits overwrote each other"
 store.engine.dispose()
 reopened = Store(url)
 assert reopened.get(project, "thread", "persist")["title"] == "Survives restart"

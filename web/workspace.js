@@ -3,13 +3,13 @@
   const launch = document.getElementById("workspace-open");
   let snapshot, section = "Overview", content, notice;
   const node = (tag, cls, value) => { const n = document.createElement(tag); if (cls) n.className = cls; if (value !== undefined) n.textContent = value; return n; };
-  const button = (label, action, cls = "ws-button") => { const n = node("button", cls, label); n.type = "button"; n.addEventListener("click", async () => { n.disabled = true; try { await action(); } catch (e) { notify(e.message || "Something went wrong. Please try again.", true); } finally { n.disabled = false; } }); return n; };
+  const button = (label, action, cls = "ws-button") => { const n = node("button", cls, label); n.type = "button"; n.addEventListener("click", async () => { n.disabled = true; try { await action(); } catch (e) { notify(e.message || "Something went wrong. Please try again.", true); if(e.code==="configuration_conflict")notice.append(button("Reload latest (discard draft)",refresh)); } finally { n.disabled = false; } }); return n; };
   const money = (value) => `$${Number(value || 0).toFixed(4)}`;
-  const errors = { unauthorized: "Sign in again to continue.", configuration_conflict: "Another administrator changed this policy. Reopen Routing to load the latest settings before saving.", admin_required: "Only workspace administrators can change this.", provider_discovery_failed: "Could not list models. Check the credential and endpoint, or enter a model ID manually.", api_key_required: "Enter a provider API key.", provider_host_not_approved: "This endpoint must be approved by the server operator.", project_budget_exceeded: "This workspace has reached its 24-hour budget.", no_eligible_model: "Connect and enable a model that fits your routing limits.", invalid_number: "Check the numeric limits and pricing values.", request_in_progress: "This request is already running.", invalid_invitation: "This invitation is invalid, used, or expired." };
+  const errors = { unauthorized: "Sign in again to continue.", configuration_conflict: "Another administrator saved changes first. Your edits have not been saved. Reload the latest version before editing again.", admin_required: "Only workspace administrators can change this.", provider_discovery_failed: "Could not list models. Check the credential and endpoint, or enter a model ID manually.", api_key_required: "Enter a provider API key.", provider_host_not_approved: "This endpoint must be approved by the server operator.", project_budget_exceeded: "This workspace has reached its 24-hour budget.", no_eligible_model: "Connect and enable a model that fits your routing limits.", invalid_number: "Check the numeric limits and pricing values.", request_in_progress: "This request is already running.", invalid_invitation: "This invitation is invalid, used, or expired." };
   async function call(path, data) {
     const response = await fetch(path, data === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json", "X-CSRF-Token":document.querySelector('meta[name="csrf-token"]').content}, body:JSON.stringify(data)});
     const result = await response.json();
-    if (!response.ok) { const code = typeof result.error === "string" ? result.error : result.error?.code; throw new Error(errors[code] || (code || "Request failed").replaceAll("_", " ")); }
+    if (!response.ok) { const code = typeof result.error === "string" ? result.error : result.error?.code; const error=new Error(errors[code] || (code || "Request failed").replaceAll("_", " ")); error.code=code; throw error; }
     return result;
   }
   const change = (action, data={}) => call("/workspace", {action,...data});
@@ -83,7 +83,7 @@
     if(["owner","admin"].includes(snapshot.role))content.append(button("+ Connect provider",()=>connect()));
     for(const p of snapshot.providers)content.append(row(p.name,`${p.adapter} · ${p.health?.status||"untested"}`, [button("Manage",()=>connect(p))]));
     content.append(node("h3",null,"Model catalog"));
-    for(const m of snapshot.models)content.append(row(m.display_name,`${m.provider} · ${m.enabled?"Enabled":"Disabled"} · ${m.context_window.toLocaleString()} context`,[button("Edit",()=>modelForm(m.provider,m.upstream_model_id,m))]));
+    for(const m of snapshot.models)content.append(row(m.display_name,`${m.provider} · ${m.enabled?"Enabled":"Disabled"} · ${m.context_window.toLocaleString()} context`,["owner","admin"].includes(snapshot.role)?[button("Edit",()=>modelForm(m.provider,m.upstream_model_id,m))]:[]));
     if(!snapshot.models.length)empty("No models enabled. Add a connection above to begin.");
   }
   function connect(existing) {
@@ -91,15 +91,16 @@
     let template=existing ? ({"https://api.openai.com/v1":"openai","https://api.anthropic.com/v1":"anthropic","https://api.groq.com/openai/v1":"groq","https://openrouter.ai/api/v1":"openrouter"}[existing.base_url]||"custom") : "openai";
     const choices=node("div","ws-choices");
     const name=field("Connection name",existing?.name||"openai"), key=field("API key","","password"), url=field("Endpoint URL",existing?.base_url||"https://api.openai.com/v1");
+    name.input.readOnly=Boolean(existing);
     const templates={openai:"https://api.openai.com/v1",anthropic:"https://api.anthropic.com/v1",groq:"https://api.groq.com/openai/v1",openrouter:"https://openrouter.ai/api/v1",custom:"https://your-approved-host.example/v1",local:"http://127.0.0.1:11434/v1"};
     for(const choice of Object.keys(templates)){
       if(choice==="local"&&snapshot.saas)continue;
-      const b=button(choice,()=>{template=choice==="local"?"custom":choice;name.input.value=choice;url.input.value=templates[choice];choices.querySelectorAll("button").forEach(x=>x.classList.remove("selected"));b.classList.add("selected");},"ws-choice"+(choice===template?" selected":""));choices.append(b);
+      const b=button(choice,()=>{template=choice==="local"?"custom":choice;if(!existing)name.input.value=choice;url.input.value=templates[choice];choices.querySelectorAll("button").forEach(x=>x.classList.remove("selected"));b.classList.add("selected");},"ws-choice"+(choice===template?" selected":""));choices.append(b);
     }
     const enabled=node("input");enabled.type="checkbox";enabled.checked=existing?.enabled!==false;
     const enabledLabel=node("label","ws-check");enabledLabel.append(enabled,document.createTextNode("Connection enabled"));
     content.append(choices,name.wrap,url.wrap,key.wrap,enabledLabel,button("Save connection",async()=>{
-      await change("connection_save",{name:name.input.value,template,base_url:url.input.value,api_key:key.input.value,enabled:enabled.checked});key.input.value="";snapshot=await call("/workspace"); discover(name.input.value);
+      await change("connection_save",{revision:existing?.revision||0,name:name.input.value,template,base_url:url.input.value,api_key:key.input.value,enabled:enabled.checked});key.input.value="";snapshot=await call("/workspace"); discover(name.input.value);
     },"ws-button primary"));
   }
   function discover(provider) {
@@ -114,6 +115,7 @@
   function modelForm(provider, upstream, existing) {
     content.replaceChildren();heading("03 / Review & enable", "Verify capabilities and prices against your provider's documentation. Quality and latency are routing estimates.");
     const fields={model_id:field("Router model ID",existing?.model_id||`${provider}/${upstream}`),upstream_model_id:field("Provider model ID",upstream),display_name:field("Display name",existing?.display_name||upstream),context_window:field("Context window (tokens)",existing?.context_window||128000,"number"),max_output_tokens:field("Maximum output tokens",existing?.max_output_tokens||4096,"number"),input_usd_per_million:field("Input USD / million tokens",existing?.input_usd_per_million??"","number"),output_usd_per_million:field("Output USD / million tokens",existing?.output_usd_per_million??"","number"),expected_latency_ms:field("Expected latency (ms)",existing?.expected_latency_ms||2000,"number"),quality:field("Estimated quality (0–1)",existing?.quality?.chat??.7,"number"),criteria:field("Best suited for",existing?.criteria||"General conversation and reasoning")};
+    fields.model_id.input.readOnly=Boolean(existing);
     const grid=node("div","ws-grid");for(const f of Object.values(fields)){f.input.step="any";grid.append(f.wrap);}
     const image=node("input");image.type="checkbox";image.checked=existing?.modalities?.includes("image")||false;
     const imageLabel=node("label","ws-check");imageLabel.append(image,document.createTextNode("Supports image input"));
@@ -122,7 +124,7 @@
     const tools=node("input");tools.type="checkbox";tools.checked=existing?.supports_tools===true;
     const toolsLabel=node("label","ws-check");toolsLabel.append(tools,document.createTextNode("Supports function tools (API)"));
     content.append(grid,imageLabel,toolsLabel,enableLabel,button("Save model",async()=>{
-      const m={provider,regions:["us"],modalities:image.checked?["text","image"]:["text"],supports_tools:tools.checked,enabled:enable.checked,output_token_cap:1024};
+      const m={revision:existing?.revision||0,provider,regions:["us"],modalities:image.checked?["text","image"]:["text"],supports_tools:tools.checked,enabled:enable.checked,output_token_cap:1024};
       for(const [name,f] of Object.entries(fields)){
         if(!f.input.value.trim())throw new Error("Fill in every model field, including verified pricing.");
         m[name]=f.input.type==="number"?Number(f.input.value):f.input.value;
@@ -157,7 +159,7 @@
     if(!snapshot.reports.length)empty("No reports yet. The bug button captures issues as they happen.");
     for(const r of snapshot.reports){const card=node("article","ws-result");card.append(node("strong",null,r.id),node("p",null,r.description),node("p","ws-copy",r.status));
       const tags=field("Tags",r.tags||""), actions=node("div","ws-actions");
-      for(const state of ["new","investigating","resolved"])actions.append(button(state,async()=>{await change("report_status",{id:r.id,status:state,tags:tags.input.value});await refresh();}));
+      for(const state of ["new","investigating","resolved"])actions.append(button(state,async()=>{await change("report_status",{revision:r.revision||0,id:r.id,status:state,tags:tags.input.value});await refresh();}));
       actions.append(link("Export",`/export/report/${r.id}`),button("View screenshot",()=>{const img=node("img","ws-report-image");img.alt="Submitted bug report screenshot";img.src=`/export/report/${r.id}?image=1`;img.addEventListener("error",()=>{img.remove();notify("This report has no screenshot.");},{once:true});card.append(img);}));card.append(tags.wrap,actions);content.append(card);
     }
   }

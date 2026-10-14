@@ -221,3 +221,52 @@ class SaaSTests(unittest.TestCase):
             self.assertEqual(self.post("/turn", {"message": "Hello"}).status_code, 503)
             self.assertEqual(self.post("/compare", {}).status_code, 503)
             generation.assert_not_called()
+
+    def test_stale_connection_edit_preserves_new_credential(self):
+        first = {"action":"connection_save", "name":"shared", "template":"openai", "api_key":"first", "revision":0}
+        self.assertEqual(self.post("/workspace", first).status_code, 200)
+        current = self.app.state.workspace.status("local")
+        self.assertEqual(next(p for p in current if p["name"]=="shared")["revision"], 1)
+        newer = {**first, "api_key":"rotated", "revision":1}
+        self.assertEqual(self.post("/workspace", newer).status_code, 200)
+        stale = {**first, "api_key":"", "enabled":False, "revision":1}
+        self.assertEqual(self.post("/workspace", stale).status_code, 409)
+        connection = self.app.state.workspace.connections("local")["shared"]
+        self.assertTrue(connection.enabled)
+        self.assertEqual(connection.key(), "rotated")
+        self.assertNotIn("rotated", json.dumps(self.client.get("/workspace").json()))
+
+    def test_stale_model_edit_rejected(self):
+        model = self.app.state.workspace.model_rows("local")[0]
+        self.assertEqual(self.post("/workspace", {"action":"model_save", "model":{**model,"revision":0}}).status_code, 200)
+        self.assertEqual(self.post("/workspace", {"action":"model_save", "model":{**model,"revision":0,"enabled":False}}).status_code, 409)
+        self.assertTrue(self.store.get("local", "model", model["model_id"])["enabled"])
+
+    def test_report_conflict_preserves_latest_triage(self):
+        report = self.post("/reports", {"description":"The model button did not respond"}).json()
+        action = {"action":"report_status", "id":report["id"], "status":"investigating", "tags":"frontend", "revision":0}
+        self.assertEqual(self.post("/workspace", action).status_code, 200)
+        self.assertEqual(self.post("/workspace", {**action,"status":"resolved"}).status_code, 409)
+        saved = self.store.get("local", "report", report["id"])
+        self.assertEqual(saved["status"], "investigating")
+        self.assertEqual(saved["tags"], "frontend")
+        self.assertEqual(saved["description"], "The model button did not respond")
+
+    def test_null_or_boolean_revision_cannot_bypass_conflict_check(self):
+        for revision in [None, True, -1, "0"]:
+            response = self.post("/workspace", {"action":"connection_save", "name":"invalid", "template":"openai", "api_key":"test-only", "revision":revision})
+            self.assertEqual(response.status_code, 400)
+        self.assertIsNone(self.store.get("local", "connection", "invalid"))
+
+    def test_concurrent_document_edit_has_one_winner(self):
+        self.store.put("local", "model", "concurrent", {"enabled":True})
+        def change(index):
+            try:
+                self.store.put("local", "model", "concurrent", {"winner":index}, expected_revision=0)
+                return True
+            except ServiceError as exc:
+                self.assertEqual(exc.code, "configuration_conflict")
+                return False
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            self.assertEqual(sum(pool.map(change, range(8))), 1)
+        self.assertEqual(self.store.get("local", "model", "concurrent")["revision"], 1)
