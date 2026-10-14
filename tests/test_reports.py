@@ -66,7 +66,9 @@ class ReportHTTPTests(unittest.TestCase):
         from llm_router import web
         headers = self.session()
         token = headers["Cookie"].split("router_session=", 1)[1].split(";", 1)[0]
-        web._sessions[token]["last_seen"] = 0
+        # monotonic() has an arbitrary origin; a fresh CI host may have
+        # less than one hour of uptime, so zero is not necessarily expired.
+        web._sessions[token]["last_seen"] = web.time.monotonic() - 3601
         self.assertEqual(self.request("/state", headers=headers)[0], 403)
 
     def test_unlock_limit_is_shared_across_new_sessions(self):
