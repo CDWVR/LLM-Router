@@ -35,6 +35,7 @@ services:
         condition: service_healthy
     environment:
       ROUTER_DEPLOYMENT: saas
+      PORT: "8765"
       ROUTER_GENERATION_ENABLED: ${ROUTER_GENERATION_ENABLED:-1}
       ROUTER_TRUSTED_PROXY_CIDRS: ${ROUTER_TRUSTED_PROXY_CIDRS:-}
       DATABASE_URL: postgresql+psycopg://router:${POSTGRES_PASSWORD}@db/router

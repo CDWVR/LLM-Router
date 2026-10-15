@@ -10,6 +10,8 @@ COPY catalog.json ./
 RUN mkdir -p /app/data && chown router:router /app/data
 USER router
 ENV PATH="/opt/venv/bin:$PATH"
-EXPOSE 8765
+# Railway may override PORT at runtime; the server and healthcheck both read it.
+ENV PORT=8080
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD ["python", "-m", "llm_router.healthcheck"]
 CMD ["python", "-m", "llm_router.serve"]
