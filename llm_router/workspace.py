@@ -1,6 +1,7 @@
 """Connection onboarding, encrypted secrets, and isolated execution snapshots."""
 import ipaddress
 import json
+import logging
 import os
 import re
 import time
@@ -119,11 +120,16 @@ class Workspace:
             reason = {401: "The provider rejected this API key.", 403: "This key is not permitted to list models.",
                       404: "That endpoint does not offer a /models list.",
                       429: "The provider is rate limiting this key."}.get(error.code, "The provider is unavailable." if 500 <= error.code < 600 else "The provider returned HTTP "+str(error.code)+".")
+            logging.getLogger("router.providers").warning("Discovery rejected for %s: HTTP %s %s", name, error.code, reason)
             self.store.put(project, "health", name, {"status": "unavailable", "checked": time.time(), "reason": reason})
             raise ServiceError("provider_discovery_failed", 502, reason) from None
-        except Exception:
-            self.store.put(project, "health", name, {"status": "unavailable", "checked": time.time(), "reason": "The endpoint could not be reached. Check the URL and that the provider is reachable from the server."})
-            raise ServiceError("provider_discovery_failed", 502, "The endpoint could not be reached. Check the URL and that the provider is reachable from the server.") from None
+        except Exception as error:
+            unreachable = "The endpoint could not be reached. Check the URL and that the provider is reachable from the server."
+            # The type separates a name or TLS problem from a timeout or a
+            # refused connection without ever logging the credential.
+            logging.getLogger("router.providers").warning("Discovery failed for %s: %s: %s", name, type(error).__name__, error)
+            self.store.put(project, "health", name, {"status": "unavailable", "checked": time.time(), "reason": unreachable})
+            raise ServiceError("provider_discovery_failed", 502, unreachable) from None
         self.store.put(project, "health", name, {"status": "reachable", "checked": time.time()})
         return {"models": result, "note": "Discovery checks credentials without generating an answer. Review pricing and capabilities before enabling."}
 
