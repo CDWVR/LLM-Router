@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import ArgumentError, OperationalError
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
@@ -89,6 +89,16 @@ class DeploymentTests(unittest.TestCase):
 
     def test_hint_explains_missing_migration(self):
         self.assertIn('pre-deploy migration', hint(RuntimeError('Database migration required: python -m llm_router.manage migrate')))
+
+    def test_hint_explains_self_referential_database_url(self):
+        for value in ['${{DATABASE_URL}}','"${{Postgres.DATABASE_URL}}"']:
+            with patch.dict(os.environ, {'DATABASE_URL':value}, clear=True):
+                try:
+                    database_url(value)
+                except ArgumentError as error:
+                    message = hint(error)
+                    self.assertIn('not a database', message)
+                    self.assertIn('Postgres.DATABASE_URL', message)
 
     def test_preflight_exits_before_uvicorn_binds_a_port(self):
         # A factory exception must terminate the container, not leave a process

@@ -27,6 +27,11 @@ def server_options():
 def hint(error):
     """Name the operator action that resolves a startup failure."""
     message = str(error)
+    if "parse SQLAlchemy URL" in message or "Could not parse" in message:
+        url = os.environ.get("DATABASE_URL", "")
+        return message + (" | DATABASE_URL is set to " + repr(url) + ", which is not a database"
+                          " URL; use the Railway reference ${{Postgres.DATABASE_URL}} where"
+                          " Postgres is your database service name, and do not wrap it in quotes")
     if "SaaS requires" in message:
         missing = [name for name, ok in (
             ("DATABASE_URL", os.environ.get("DATABASE_URL", "").startswith("postgresql")),
