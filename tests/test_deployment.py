@@ -2,13 +2,14 @@ import os
 import unittest
 from unittest.mock import patch
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.testclient import TestClient
 from llm_router.configuration import database_url
-from llm_router.serve import server_options
+from llm_router.serve import hint, preflight, server_options
 from llm_router.probes import ProbeHostBoundary, RAILWAY_PROBE_HOST
 from llm_router.abuse import AbuseProtection
 
@@ -72,3 +73,27 @@ class DeploymentTests(unittest.TestCase):
         with patch.dict(os.environ, {'ROUTER_CLIENT_IP_HEADER':'untrusted-header'}):
             with self.assertRaises(RuntimeError):
                 AbuseProtection(None,None,b'test')
+
+    def test_hint_names_missing_saas_variables(self):
+        environment = {'ROUTER_DEPLOYMENT':'saas','DATABASE_URL':'sqlite:///data/workspace.sqlite3',
+                       'ROUTER_PUBLIC_URL':'http://insecure.example','ROUTER_SECRET_KEY':'',
+                       'OIDC_ISSUER':'','OIDC_CLIENT_ID':'','OIDC_CLIENT_SECRET':''}
+        with patch.dict(os.environ, environment, clear=True):
+            message = hint(RuntimeError('SaaS requires PostgreSQL, HTTPS ROUTER_PUBLIC_URL, OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET'))
+        for name in ['DATABASE_URL','ROUTER_PUBLIC_URL','ROUTER_SECRET_KEY','OIDC_ISSUER','OIDC_CLIENT_ID','OIDC_CLIENT_SECRET']:
+            self.assertIn(name, message)
+
+    def test_hint_explains_unreachable_database(self):
+        error = OperationalError('select 1', {}, Exception('connection refused'))
+        self.assertIn('private DATABASE_URL', hint(error))
+
+    def test_hint_explains_missing_migration(self):
+        self.assertIn('pre-deploy migration', hint(RuntimeError('Database migration required: python -m llm_router.manage migrate')))
+
+    def test_preflight_exits_before_uvicorn_binds_a_port(self):
+        # A factory exception must terminate the container, not leave a process
+        # holding 0.0.0.0:$PORT while its workers respawn and die.
+        with patch('llm_router.service.create_app', side_effect=RuntimeError('SaaS requires PostgreSQL')):
+            with self.assertRaises(SystemExit) as exit_code:
+                preflight()
+        self.assertEqual(exit_code.exception.code, 1)
