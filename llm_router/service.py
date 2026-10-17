@@ -623,8 +623,13 @@ def create_app(database_url=None, secret_key=None, saas=None):
 
     async def error(request, exc):
         code = exc.code if isinstance(exc, ServiceError) else "invalid_request"
-        payload = {"code": code, "message": code.replace("_", " "), "type": "router_error"} if request.url.path.startswith("/v1/") else code
-        return JSONResponse({"error": payload}, status_code=exc.status if isinstance(exc, ServiceError) else 400)
+        detail = getattr(exc, "detail", "")
+        if request.url.path.startswith("/v1/"):
+            payload = {"code": code, "message": detail or code.replace("_", " "), "type": "router_error"}
+            return JSONResponse({"error": payload}, status_code=exc.status if isinstance(exc, ServiceError) else 400)
+        # Keep the bare code for existing clients and add the operator's own
+        # reason when the server has one, so a rejected form is not a dead end.
+        return JSONResponse({"error": code, **({"detail": detail} if detail else {})}, status_code=exc.status if isinstance(exc, ServiceError) else 400)
 
     @asynccontextmanager
     async def lifespan(app):

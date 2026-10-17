@@ -24,8 +24,8 @@ Index("sessions_expires", sessions.c.expires)
 
 
 class ServiceError(ValueError):
-    def __init__(self, code, status=400):
-        self.code, self.status = code, status
+    def __init__(self, code, status=400, detail=""):
+        self.code, self.status, self.detail = code, status, detail
         super().__init__(code)
 
 

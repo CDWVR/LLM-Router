@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -235,6 +236,35 @@ class SaaSTests(unittest.TestCase):
         self.assertTrue(connection.enabled)
         self.assertEqual(connection.key(), "rotated")
         self.assertNotIn("rotated", json.dumps(self.client.get("/workspace").json()))
+
+    def test_rejected_connection_reports_the_operator_reason(self):
+        # A rejected endpoint used to answer a bare "invalid_request", leaving
+        # no way to tell which part of the form to correct.
+        cases = {"http://example.com/v1": "HTTPS",
+                 "https://u:p@example.com/v1": "without credentials",
+                 "https://example.com/v1?x=1": "without credentials"}
+        for url, expected in cases.items():
+            response = self.post("/workspace", {"action":"connection_save", "name":"probe", "template":"custom",
+                                                "base_url":url, "api_key":"sk-x", "enabled":True, "revision":0})
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json()["error"], "invalid_connection")
+            self.assertIn(expected, response.json()["detail"])
+
+    def test_discovery_distinguishes_rejection_from_unreachable(self):
+        workspace = self.app.state.workspace
+        original = workspace.connections
+        workspace.connections = lambda _p: {"probe": load_connections()["groq"]}
+        try:
+            with patch("llm_router.workspace.open_request", side_effect=urllib.error.HTTPError("u", 401, "no", {}, None)):
+                with self.assertRaises(ServiceError) as rejected:
+                    workspace.discover("local", "probe")
+            self.assertIn("rejected this API key", rejected.exception.detail)
+            with patch("llm_router.workspace.open_request", side_effect=OSError("dns")):
+                with self.assertRaises(ServiceError) as unreachable:
+                    workspace.discover("local", "probe")
+            self.assertIn("could not be reached", unreachable.exception.detail)
+        finally:
+            workspace.connections = original
 
     def test_model_without_upstream_id_is_rejected(self):
         # "Configure model manually" used to save a bare "provider/" Router ID,

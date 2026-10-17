@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from dataclasses import asdict, replace
@@ -14,7 +15,7 @@ from cryptography.fernet import Fernet
 from . import registry
 from .gateway import open_request
 from .policy import ROUTING_PROFILE
-from .providers import BUILTINS, CONNECTION_SCOPE, parse_connection
+from .providers import BUILTINS, CONNECTION_SCOPE, ProviderConfigError, parse_connection
 from .store import ServiceError
 
 
@@ -53,6 +54,18 @@ class Workspace:
                  "health": self.store.get(project, "health", c.name) or {"status": "untested"}}
                 for c in self.connections(project).values()]
 
+    def _parse(self, name, config):
+        """Reject an unusable endpoint with the provider's own reason.
+
+        parse_connection raises a ValueError, which the API otherwise reports as
+        a bare "invalid request". The wording it produces is the only thing that
+        tells the operator which part of the form to change.
+        """
+        try:
+            return parse_connection(name, config)
+        except ProviderConfigError as error:
+            raise ServiceError("invalid_connection", 400, str(error)) from None
+
     def save_connection(self, project, body):
         name = body.get("name", "")
         template = body.get("template", "custom")
@@ -64,7 +77,7 @@ class Workspace:
                       "api_key_env": "ROUTER_MANAGED_KEY", "enabled": body.get("enabled", True)}
             if not self.saas and urlsplit(config["base_url"] or "").hostname in {"localhost", "127.0.0.1", "::1"}:
                 config["api_key_env"] = None
-        connection = parse_connection(name, config)
+        connection = self._parse(name, config)
         parsed = urlsplit(connection.base_url)
         if self.saas:
             approved = {urlsplit(c.base_url).hostname for c in BUILTINS.values()}
@@ -101,9 +114,16 @@ class Workspace:
                     raise ValueError
                 rows = json.loads(payload).get("data", [])
                 result = [{"id": r["id"], "name": r.get("display_name", r["id"])} for r in rows[:300] if isinstance(r, dict) and isinstance(r.get("id"), str)]
+        except urllib.error.HTTPError as error:
+            # A rejected credential is the common case and deserves a real answer.
+            reason = {401: "The provider rejected this API key.", 403: "This key is not permitted to list models.",
+                      404: "That endpoint does not offer a /models list.",
+                      429: "The provider is rate limiting this key."}.get(error.code, "The provider is unavailable." if 500 <= error.code < 600 else "The provider returned HTTP "+str(error.code)+".")
+            self.store.put(project, "health", name, {"status": "unavailable", "checked": time.time(), "reason": reason})
+            raise ServiceError("provider_discovery_failed", 502, reason) from None
         except Exception:
-            self.store.put(project, "health", name, {"status": "unavailable", "checked": time.time()})
-            raise ServiceError("provider_discovery_failed", 502) from None
+            self.store.put(project, "health", name, {"status": "unavailable", "checked": time.time(), "reason": "The endpoint could not be reached. Check the URL and that the provider is reachable from the server."})
+            raise ServiceError("provider_discovery_failed", 502, "The endpoint could not be reached. Check the URL and that the provider is reachable from the server.") from None
         self.store.put(project, "health", name, {"status": "reachable", "checked": time.time()})
         return {"models": result, "note": "Discovery checks credentials without generating an answer. Review pricing and capabilities before enabling."}
 
