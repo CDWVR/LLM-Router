@@ -67,7 +67,7 @@ class SecurityHeaders:
             if message["type"] == "http.response.start":
                 status = message["status"]
                 message.setdefault("headers", []).append((b"x-request-id", request_id.encode()))
-                message.setdefault("headers", []).extend([(b"content-security-policy", b"default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"), (b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"no-referrer"), (b"x-frame-options", b"DENY")])
+                message.setdefault("headers", []).extend([(b"content-security-policy", b"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"), (b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"no-referrer"), (b"x-frame-options", b"DENY")])
                 if self.saas:
                     message["headers"].append((b"strict-transport-security", b"max-age=31536000"))
                 if not scope.get("path", "").startswith(("/vendor/", "/fonts/")):

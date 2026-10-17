@@ -116,6 +116,17 @@
     content.replaceChildren();heading("03 / Review & enable", "Verify capabilities and prices against your provider's documentation. Quality and latency are routing estimates.");
     const fields={model_id:field("Router model ID",existing?.model_id||`${provider}/${upstream}`),upstream_model_id:field("Provider model ID",upstream),display_name:field("Display name",existing?.display_name||upstream),context_window:field("Context window (tokens)",existing?.context_window||128000,"number"),max_output_tokens:field("Maximum output tokens",existing?.max_output_tokens||4096,"number"),input_usd_per_million:field("Input USD / million tokens",existing?.input_usd_per_million??"","number"),output_usd_per_million:field("Output USD / million tokens",existing?.output_usd_per_million??"","number"),expected_latency_ms:field("Expected latency (ms)",existing?.expected_latency_ms||2000,"number"),quality:field("Estimated quality (0–1)",existing?.quality?.chat??.7,"number"),criteria:field("Best suited for",existing?.criteria||"General conversation and reasoning")};
     fields.model_id.input.readOnly=Boolean(existing);
+    if(!existing){
+      // "Configure model manually" opens this form before the provider ID is
+      // known, so the default Router ID would be saved as a bare "provider/".
+      // Follow the provider ID until the operator renames the model themselves.
+      let renamed=false;
+      fields.model_id.input.addEventListener("input",()=>{renamed=true;});
+      fields.upstream_model_id.input.addEventListener("input",()=>{
+        if(!renamed){const value=fields.upstream_model_id.input.value.trim();
+          fields.model_id.input.value=value?`${provider}/${value}`:"";}
+      });
+    }
     const grid=node("div","ws-grid");for(const f of Object.values(fields)){f.input.step="any";grid.append(f.wrap);}
     const image=node("input");image.type="checkbox";image.checked=existing?.modalities?.includes("image")||false;
     const imageLabel=node("label","ws-check");imageLabel.append(image,document.createTextNode("Supports image input"));

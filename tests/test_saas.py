@@ -236,6 +236,16 @@ class SaaSTests(unittest.TestCase):
         self.assertEqual(connection.key(), "rotated")
         self.assertNotIn("rotated", json.dumps(self.client.get("/workspace").json()))
 
+    def test_model_without_upstream_id_is_rejected(self):
+        # "Configure model manually" used to save a bare "provider/" Router ID,
+        # producing a model that lists and enables but never matches a call.
+        model = dict(self.app.state.workspace.model_rows("local")[0])
+        for broken in ({**model, "model_id": "shared/", "revision":0},
+                       {**model, "model_id": " shared/x", "revision":0},
+                       {**model, "upstream_model_id": "   ", "revision":0}):
+            self.assertEqual(self.post("/workspace", {"action":"model_save", "model":broken}).status_code, 400)
+        self.assertNotIn("shared/", [m["model_id"] for m in self.app.state.workspace.model_rows("local")])
+
     def test_stale_model_edit_rejected(self):
         model = self.app.state.workspace.model_rows("local")[0]
         self.assertEqual(self.post("/workspace", {"action":"model_save", "model":{**model,"revision":0}}).status_code, 200)

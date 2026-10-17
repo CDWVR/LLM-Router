@@ -33,6 +33,16 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def spent_micro(db, condition):
+    """Sum a micro-dollar column as a plain int.
+
+    PostgreSQL types SUM(bigint) as NUMERIC, so the driver hands back a Decimal
+    that cannot be divided by a float and cannot be serialised as JSON. Every
+    micro-dollar total crosses this boundary so SQLite and PostgreSQL agree.
+    """
+    return int(db.execute(select(func.coalesce(func.sum(runs.c.charge_micro), 0)).where(condition)).scalar() or 0)
+
+
 class Store:
     def __init__(self, url, auto_migrate=None):
         from .configuration import database_url
@@ -239,7 +249,7 @@ class Store:
             if recent_count >= 30:
                 raise ServiceError("rate_limited", 429)
             reserved = int(round(ceiling * 1_000_000))
-            spent = db.execute(select(func.coalesce(func.sum(runs.c.charge_micro), 0)).where(scope)).scalar()
+            spent = spent_micro(db, scope)
             if reserved + spent > workspace["daily_micro"]:
                 raise ServiceError("project_budget_exceeded", 429)
             db.execute(insert(runs).values(project_id=project, id=request_id, fingerprint=fingerprint, thread_id=thread_id, status="running", created=now, lease=now+210, charge_micro=reserved, result=None, telemetry={}))
@@ -255,8 +265,8 @@ class Store:
     def usage(self, project):
         with self.engine.connect() as db:
             rows = [dict(row) for row in db.execute(select(runs).where(runs.c.project_id == project).order_by(runs.c.created.desc()).limit(500)).mappings()]
-            ceiling = db.execute(select(projects.c.daily_micro).where(projects.c.id == project)).scalar()
-            reserved = db.execute(select(func.coalesce(func.sum(runs.c.charge_micro), 0)).where(runs.c.project_id == project, runs.c.created > time.time()-86400)).scalar()
+            ceiling = int(db.execute(select(projects.c.daily_micro).where(projects.c.id == project)).scalar() or 0)
+            reserved = spent_micro(db, (runs.c.project_id == project) & (runs.c.created > time.time()-86400))
         return {"daily_limit_usd": ceiling/1e6, "reserved_24h_usd": reserved/1e6, "requests": [{k:v for k,v in r.items() if k not in {"result", "fingerprint", "project_id"}} for r in rows]}
 
     def save_routing(self, project, settings, daily_limit, expected_revision):

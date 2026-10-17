@@ -41,6 +41,12 @@ def edit(index):
         return False
 with concurrent.futures.ThreadPoolExecutor(8) as pool:
     assert sum(pool.map(edit, range(8))) == 1, "Concurrent edits overwrote each other"
+# PostgreSQL types SUM(bigint) as NUMERIC. A Decimal micro-dollar total cannot be
+# divided by a float, so usage() raised and the whole workspace panel returned
+# 500 for every signed-in SaaS user. Assert the boundary returns plain floats.
+usage = store.usage(project)
+assert isinstance(usage["reserved_24h_usd"], float), type(usage["reserved_24h_usd"])
+assert isinstance(usage["daily_limit_usd"], float), type(usage["daily_limit_usd"])
 store.engine.dispose()
 reopened = Store(url)
 assert reopened.get(project, "thread", "persist")["title"] == "Survives restart"

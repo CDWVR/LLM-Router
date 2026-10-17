@@ -123,6 +123,12 @@ class Workspace:
             raise ServiceError("invalid_model")
         if not isinstance(body.get("model_id"), str) or not 1 <= len(body["model_id"]) <= 128:
             raise ServiceError("invalid_model_id")
+        # A bare "provider/" prefix means the operator never supplied an
+        # upstream model ID. It would route but never match a real call.
+        if body["model_id"].strip() != body["model_id"] or body["model_id"].endswith("/"):
+            raise ServiceError("invalid_model_id")
+        if not isinstance(body.get("upstream_model_id"), str) or not body["upstream_model_id"].strip():
+            raise ServiceError("invalid_model_id")
         token = CONNECTION_SCOPE.set(self.connections(project))
         try:
             model = registry._record(body)
